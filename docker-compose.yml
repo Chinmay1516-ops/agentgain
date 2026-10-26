@@ -1,0 +1,16 @@
+version: "3.9"
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: agentgain_db
+    environment:
+      POSTGRES_USER: agentgain
+      POSTGRES_PASSWORD: agentgain_local_password
+      POSTGRES_DB: agentgain
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
