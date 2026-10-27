@@ -1,6 +1,10 @@
-venv/
-__pycache__/
-*.pyc
 .env
 *.db
-.DS_Store
+*.db-*
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+*.log
+private_data/

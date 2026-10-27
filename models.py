@@ -1,20 +1,24 @@
+"""Shared SQLAlchemy models. See README for existing-database migration cautions."""
 import enum
 from datetime import datetime, timezone
 from sqlalchemy import (
     Column, String, Integer, Numeric, Boolean, DateTime,
-    ForeignKey, JSON, Text, Enum, UniqueConstraint
+    ForeignKey, JSON, Text, Enum, UniqueConstraint,
 )
 from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
 
+
 def utcnow():
     return datetime.now(timezone.utc)
+
 
 class ContractStatus(str, enum.Enum):
     DRAFT = "DRAFT"
     FROZEN = "FROZEN"
     COMPLETED = "COMPLETED"
+
 
 class PaymentState(str, enum.Enum):
     UNINITIALIZED = "UNINITIALIZED"
@@ -26,11 +30,13 @@ class PaymentState(str, enum.Enum):
     VOIDED = "VOIDED"
     PAYMENT_ERROR = "PAYMENT_ERROR"
 
+
 class JobStatus(str, enum.Enum):
     QUEUED = "QUEUED"
     RUNNING = "RUNNING"
     COMPLETED = "COMPLETED"
     FAILED_RETRYABLE = "FAILED_RETRYABLE"
+
 
 class EvalVerdict(str, enum.Enum):
     PENDING = "PENDING"
@@ -39,11 +45,13 @@ class EvalVerdict(str, enum.Enum):
     INCONCLUSIVE = "INCONCLUSIVE"
     TECHNICAL_ERROR = "TECHNICAL_ERROR"
 
+
 class RecordComparisonStatus(str, enum.Enum):
     IMPROVED = "IMPROVED"
     RETAINED = "RETAINED"
     REGRESSED = "REGRESSED"
     UNRESOLVED = "UNRESOLVED"
+
 
 class SkillPackage(Base):
     __tablename__ = "skill_packages"
@@ -63,6 +71,7 @@ class SkillPackage(Base):
     checkout_visits = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
+
 class BuyerTaskFailure(Base):
     __tablename__ = "buyer_task_failures"
     id = Column(String(64), primary_key=True)
@@ -70,6 +79,8 @@ class BuyerTaskFailure(Base):
     task_type = Column(String(100), nullable=False)
     raw_input_json = Column(JSON, nullable=False)
     expected_schema_json = Column(JSON, nullable=False)
+    # Without ground truth, a post-purchase 'schema valid' result is not task success.
+    checked_answer_json = Column(JSON, nullable=True)
     initial_agent_output = Column(JSON, nullable=True)
     recorded_validation_error = Column(Text, nullable=False)
     recommended_skill_id = Column(String(64), ForeignKey("skill_packages.id"), nullable=True)
@@ -78,6 +89,7 @@ class BuyerTaskFailure(Base):
     post_purchase_remaining_errors = Column(Text, nullable=True)
     buyer_feedback = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)
+
 
 class EvaluationDataset(Base):
     __tablename__ = "evaluation_datasets"
@@ -90,10 +102,11 @@ class EvaluationDataset(Base):
     dataset_sha256 = Column(String(64), nullable=False)
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
+
 class EvaluationContract(Base):
     __tablename__ = "evaluation_contracts"
     id = Column(String(64), primary_key=True)
-    buyer_id = Column(String(64), default="buyer_acme_ops", nullable=False)
+    buyer_id = Column(String(64), nullable=False)
     skill_id = Column(String(64), ForeignKey("skill_packages.id"), nullable=False)
     skill_version = Column(String(32), nullable=False)
     skill_content_sha256 = Column(String(64), nullable=False)
@@ -104,16 +117,13 @@ class EvaluationContract(Base):
     price_usd = Column(Numeric(10, 2), nullable=False)
     currency = Column(String(8), default="USD", nullable=False)
     failure_policy_json = Column(JSON, nullable=False)
-
-    
     contract_version = Column(Integer, default=1, nullable=False)
-    terms_snapshot = Column(JSON, nullable=True)
+    terms_snapshot = Column(JSON, nullable=False)
     status = Column(Enum(ContractStatus), default=ContractStatus.DRAFT, nullable=False)
-    contract_sha256 = Column(String(64), nullable=True, unique=True)
+    # Two buyers may accept identical terms, so NOT unique.
+    contract_sha256 = Column(String(64), nullable=False)
     approved_terms_hash = Column(String(64), nullable=True)
     approved_at = Column(DateTime(timezone=True), nullable=True)
-
-    
     payment_state = Column(Enum(PaymentState), default=PaymentState.UNINITIALIZED, nullable=False)
     paypal_order_id = Column(String(64), nullable=True, unique=True)
     paypal_authorization_id = Column(String(64), nullable=True, unique=True)
@@ -122,8 +132,6 @@ class EvaluationContract(Base):
     authorize_request_id = Column(String(64), nullable=True)
     capture_request_id = Column(String(64), nullable=True)
     void_request_id = Column(String(64), nullable=True)
-
-    
     eval_verdict = Column(Enum(EvalVerdict), default=EvalVerdict.PENDING, nullable=False)
     baseline_accuracy_pct = Column(Numeric(5, 2), nullable=True)
     skilled_accuracy_pct = Column(Numeric(5, 2), nullable=True)
@@ -135,11 +143,10 @@ class EvaluationContract(Base):
     baseline_total_ms = Column(Integer, default=0)
     skilled_total_ms = Column(Integer, default=0)
     verdict_reason = Column(Text, nullable=True)
-
-    
     receipt_sha256 = Column(String(64), nullable=True, unique=True)
     skill_delivered_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)
+
 
 class EvaluationJob(Base):
     __tablename__ = "evaluation_jobs"
@@ -152,6 +159,7 @@ class EvaluationJob(Base):
     started_at = Column(DateTime(timezone=True), nullable=True)
     finished_at = Column(DateTime(timezone=True), nullable=True)
 
+
 class EvaluationRecordResult(Base):
     __tablename__ = "evaluation_record_results"
     id = Column(String(64), primary_key=True)
@@ -160,21 +168,20 @@ class EvaluationRecordResult(Base):
     execution_order = Column(String(32), nullable=False)
     input_data = Column(JSON, nullable=False)
     checked_answer = Column(JSON, nullable=False)
-
     baseline_output = Column(JSON, nullable=True)
     baseline_error = Column(Text, nullable=True)
     baseline_passed = Column(Boolean, nullable=False)
     baseline_tokens = Column(Integer, nullable=False)
     baseline_ms = Column(Integer, nullable=False)
-
     skilled_output = Column(JSON, nullable=True)
     skilled_error = Column(Text, nullable=True)
     skilled_passed = Column(Boolean, nullable=False)
     skilled_tokens = Column(Integer, nullable=False)
     skilled_ms = Column(Integer, nullable=False)
-
     comparison_status = Column(Enum(RecordComparisonStatus), nullable=False)
     diff_summary = Column(Text, nullable=True)
+    __table_args__ = (UniqueConstraint("contract_id", "record_index", name="uq_contract_record"),)
+
 
 class PaymentOperationLog(Base):
     __tablename__ = "payment_operation_logs"
@@ -186,13 +193,10 @@ class PaymentOperationLog(Base):
     raw_response_json = Column(JSON, nullable=True)
     resolved = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime(timezone=True), default=utcnow)
+    __table_args__ = (UniqueConstraint("contract_id", "operation_type", name="uq_contract_payment_op"),)
 
-    __table_args__ = (
-        UniqueConstraint("contract_id", "operation_type", name="uq_contract_payment_op"),
-    )
 
 class WebhookEvent(Base):
-    """Step 14: Deduplicates incoming PayPal webhook events."""
     __tablename__ = "webhook_events"
     event_id = Column(String(64), primary_key=True)
     event_type = Column(String(100), nullable=False)

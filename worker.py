@@ -1,224 +1,247 @@
+"""Local evaluator; does not make PayPal requests.
+
+For true secret isolation, run this process in a separate container with only
+DB/Ollama environment variables, not API payment credentials.
+The shared PostgreSQL queue uses SKIP LOCKED; SQLite is for unit tests only.
+"""
 import asyncio
 import json
+import logging
 import os
 import time
 import uuid
+from datetime import datetime, timezone
+
 import httpx
 from sqlalchemy import select
-from database import AsyncSessionLocal
+from database import AsyncSessionLocal, engine
+from contracts import calculate_terms_hash
 from models import (
-    EvaluationJob, EvaluationContract, SkillPackage,
-    EvaluationDataset, EvaluationRecordResult, JobStatus, EvalVerdict
+    ContractStatus, EvaluationJob, EvaluationContract, SkillPackage,
+    EvaluationDataset, EvaluationRecordResult, JobStatus, EvalVerdict, PaymentState,
 )
+from package_guard import PackageGuard
 from verifier import DeterministicVerifier
+from config import get_settings
 
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+log = logging.getLogger(__name__)
+
 
 async def call_local_ollama_fresh_context(
-    model_name: str,
-    system_prompt: str,
-    task_input: dict,
-    output_schema: dict,
-    skill_instructions: str | None = None,
-    skill_examples: list | None = None
+    model_name: str, system_prompt: str, task_input: dict,
+    output_schema: dict, skill_instructions: str | None = None,
+    skill_examples: list | None = None,
 ) -> dict:
-    """
-    Executes a single record on local Ollama/Qwen with a completely fresh context.
-    If local Ollama is not running, falls back to a deterministic local parser
-    ONLY if ALLOW_OFFLINE_FALLBACK=1 is set for quick CI testing.
-    """
+    settings = get_settings()
+    if model_name not in settings["ALLOWED_OLLAMA_MODELS"]:
+        return {"output": None, "error": "Model is not allowlisted",
+                "infra_error": True, "tokens": 0, "ms": 0}
     full_system = system_prompt.strip()
     if skill_instructions:
-        full_system += f"\n\n--- ACQUIRED SKILL INSTRUCTIONS ---\n{skill_instructions.strip()}"
+        full_system += "\n\n--- OPTIONAL SKILL INSTRUCTIONS ---\n" + skill_instructions.strip()
     if skill_examples:
-        full_system += f"\n\n--- SKILL EXAMPLES ---\n{json.dumps(skill_examples, indent=2)}"
-
+        full_system += "\n\n--- SKILL EXAMPLES ---\n" + json.dumps(skill_examples, ensure_ascii=False)
     prompt_text = (
-        f"Convert the following input record into JSON strictly matching this schema:\n"
-        f"Schema: {json.dumps(output_schema)}\n"
-        f"Input Record: {json.dumps(task_input)}\n"
-        f"Respond ONLY with valid JSON."
+        "Produce only a JSON object satisfying this supplied schema.\n"
+        + "Schema: " + json.dumps(output_schema, ensure_ascii=False)
+        + "\nInput: " + json.dumps(task_input, ensure_ascii=False)
     )
-
-    start_ns = time.perf_counter_ns()
+    started = time.perf_counter()
     try:
-        async with httpx.AsyncClient(timeout=45.0) as client:
-            resp = await client.post(
-                f"{OLLAMA_BASE_URL}/api/generate",
-                json={
-                    "model": model_name,
-                    "system": full_system,
-                    "prompt": prompt_text,
-                    "format": "json",
-                    "stream": False,
-                    "options": {"temperature": 0.0, "num_ctx": 2048}
-                }
-            )
+        timeout = max(30, int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "90")))
+        async with httpx.AsyncClient(timeout=float(timeout), trust_env=False) as client:
+            resp = await client.post(settings["OLLAMA_BASE_URL"] + "/api/generate", json={
+                "model": model_name, "system": full_system, "prompt": prompt_text,
+                "format": "json", "stream": False,
+                "options": {"temperature": 0.0, "num_ctx": 2048},
+            })
             resp.raise_for_status()
             data = resp.json()
-            elapsed_ms = int((time.perf_counter_ns() - start_ns) / 1_000_000)
-            tokens = int(data.get("prompt_eval_count", 0)) + int(data.get("eval_count", 0))
-            raw_text = data.get("response", "{}")
-            parsed_json = json.loads(raw_text)
-            return {
-                "output": parsed_json,
-                "error": None,
-                "infra_error": False,
-                "tokens": max(tokens, 1),
-                "ms": max(elapsed_ms, 1)
-            }
-    except Exception as exc:
-        elapsed_ms = int((time.perf_counter_ns() - start_ns) / 1_000_000)
-        return {
-            "output": None,
-            "error": f"Model execution error: {str(exc)}",
-            "infra_error": True,
-            "tokens": 0,
-            "ms": max(elapsed_ms, 1)
-        }
+        tokens = int(data.get("prompt_eval_count") or 0) + int(data.get("eval_count") or 0)
+        try:
+            output = json.loads(data.get("response", ""))
+        except (json.JSONDecodeError, TypeError):
+            return {"output": None, "error": "Model output was not valid JSON",
+                    "infra_error": False, "tokens": tokens, "ms": int((time.perf_counter()-started)*1000)}
+        return {"output": output, "error": None, "infra_error": False,
+                "tokens": tokens, "ms": int((time.perf_counter()-started)*1000)}
+    except (httpx.HTTPError, ValueError, KeyError) as exc:
+        return {"output": None, "error": f"Local model service error: {type(exc).__name__}",
+                "infra_error": True, "tokens": 0, "ms": int((time.perf_counter()-started)*1000)}
 
-async def process_single_job(job_id: str):
-    """
-    Steps 8, 9, 10, 11: Loads the frozen contract & exact skill hash,
-    alternates execution order per record, and writes deterministic results.
-    """
-    async with AsyncSessionLocal() as session:
-        job = await session.get(EvaluationJob, job_id)
-        if not job:
+
+async def claim_next_job() -> str | None:
+    async with AsyncSessionLocal() as db:
+        async with db.begin():
+            result = await db.execute(select(EvaluationJob)
+                                      .where(EvaluationJob.status == JobStatus.QUEUED)
+                                      .with_for_update(skip_locked=True).limit(1))
+            job = result.scalar_one_or_none()
+            if job is None:
+                return None
+            job.status = JobStatus.RUNNING
+            job.attempt_count += 1
+            job.started_at = datetime.now(timezone.utc)
+            return job.id
+
+
+async def process_single_job(job_id: str) -> None:
+    async with AsyncSessionLocal() as db:
+        job = await db.get(EvaluationJob, job_id)
+        if job is None or job.status != JobStatus.RUNNING:
             return
+        try:
+            contract = await db.get(EvaluationContract, job.contract_id)
+            if not contract or contract.status != ContractStatus.FROZEN or contract.payment_state != PaymentState.AUTHORIZED:
+                raise RuntimeError("Contract must be frozen and PayPal authorization confirmed")
+            if (not contract.terms_snapshot
+                    or calculate_terms_hash(contract.terms_snapshot) != contract.contract_sha256
+                    or contract.approved_terms_hash != contract.contract_sha256
+                    or contract.terms_snapshot.get("buyer_id") != contract.buyer_id
+                    or contract.terms_snapshot.get("skill_version") != contract.skill_version
+                    or contract.terms_snapshot.get("evaluation_rules") != contract.scoring_rules_json
+                    or contract.terms_snapshot.get("model_name") != contract.model_name):
+                raise RuntimeError("Approved contract fingerprint/settings mismatch")
+            skill = await db.get(SkillPackage, contract.skill_id)
+            ds = await db.get(EvaluationDataset, contract.dataset_id)
+            if skill is None or ds is None:
+                raise RuntimeError("Frozen skill or dataset missing")
+            if (skill.id != contract.skill_id or skill.version != contract.skill_version
+                    or skill.content_sha256 != contract.skill_content_sha256
+                    or PackageGuard.validate_structured_skill({
+                        "version": skill.version, "instructions_md": skill.instructions_md,
+                        "examples_json": skill.examples_json, "supported_tasks": skill.supported_tasks,
+                    }) != contract.skill_content_sha256):
+                raise RuntimeError("Skill content does not match the contract")
+            if (calculate_terms_hash(ds.records_json) != contract.dataset_sha256
+                    or calculate_terms_hash(ds.output_schema_json) != contract.terms_snapshot["dataset_schema_hash"]
+                    or calculate_terms_hash(ds.baseline_agent_config) != contract.terms_snapshot["baseline_configuration_hash"]):
+                raise RuntimeError("Dataset or baseline configuration changed after contract approval")
+            if contract.model_name not in get_settings()["ALLOWED_OLLAMA_MODELS"]:
+                raise RuntimeError("Model is not allowlisted")
+            old_rows = (await db.execute(select(EvaluationRecordResult.id).where(
+                EvaluationRecordResult.contract_id == contract.id))).scalars().all()
+            if old_rows:
+                raise RuntimeError("Results already exist; cannot selectively re-evaluate")
 
-        contract = await session.get(EvaluationContract, job.contract_id)
-        skill = await session.get(SkillPackage, contract.skill_id)
-        dataset = await session.get(EvaluationDataset, contract.dataset_id)
-
-    
-        if skill.content_sha256 != contract.skill_content_sha256:
+            schema = ds.output_schema_json
+            prompt = ds.baseline_agent_config["system_prompt"]
+            results = []
+            for index, rec in enumerate(ds.records_json):
+                kwargs = {"model_name": contract.model_name, "system_prompt": prompt,
+                          "task_input": rec["input"], "output_schema": schema}
+                if index % 2 == 0:
+                    b = await call_local_ollama_fresh_context(**kwargs)
+                    s = await call_local_ollama_fresh_context(**kwargs,
+                        skill_instructions=skill.instructions_md, skill_examples=skill.examples_json)
+                    order = "BASELINE_FIRST"
+                else:
+                    s = await call_local_ollama_fresh_context(**kwargs,
+                        skill_instructions=skill.instructions_md, skill_examples=skill.examples_json)
+                    b = await call_local_ollama_fresh_context(**kwargs)
+                    order = "SKILLED_FIRST"
+                bp, be = DeterministicVerifier.check_single_output(b["output"], rec["checked_answer"], schema)
+                sp, se = DeterministicVerifier.check_single_output(s["output"], rec["checked_answer"], schema)
+                comp, summary = DeterministicVerifier.classify_record_pair(bp, sp)
+                db.add(EvaluationRecordResult(
+                    id=f"rec_{uuid.uuid4().hex}", contract_id=contract.id,
+                    record_index=index, execution_order=order, input_data=rec["input"],
+                    checked_answer=rec["checked_answer"], baseline_output=b["output"],
+                    baseline_error=b["error"] or be, baseline_passed=bp,
+                    baseline_tokens=b["tokens"], baseline_ms=b["ms"],
+                    skilled_output=s["output"], skilled_error=s["error"] or se,
+                    skilled_passed=sp, skilled_tokens=s["tokens"], skilled_ms=s["ms"],
+                    comparison_status=comp, diff_summary=summary,
+                ))
+                results.append({
+                    "baseline_passed": bp, "skilled_passed": sp, "comparison_status": comp,
+                    "baseline_tokens": b["tokens"], "skilled_tokens": s["tokens"],
+                    "baseline_ms": b["ms"], "skilled_ms": s["ms"],
+                    "baseline_infra_error": b["infra_error"], "skilled_infra_error": s["infra_error"],
+                })
+            # A separate watchdog may have timed out this job. Do not overwrite
+            # the decision or revive a voided payment from a late worker response.
+            await db.refresh(job)
+            await db.refresh(contract)
+            if job.status != JobStatus.RUNNING or contract.payment_state != PaymentState.AUTHORIZED:
+                raise RuntimeError("Job was cancelled/timed out while evaluation was running")
+            verdict = DeterministicVerifier.compute_contract_verdict(results, contract.scoring_rules_json)
+            contract.eval_verdict = verdict["verdict"]
+            contract.baseline_accuracy_pct = verdict.get("baseline_accuracy_pct")
+            contract.skilled_accuracy_pct = verdict.get("skilled_accuracy_pct")
+            contract.net_lift_pct = verdict.get("net_lift_pct")
+            contract.improvements_count = verdict.get("improvements_count", 0)
+            contract.regressions_count = verdict.get("regressions_count", 0)
+            contract.baseline_total_tokens = verdict.get("baseline_total_tokens", 0)
+            contract.skilled_total_tokens = verdict.get("skilled_total_tokens", 0)
+            contract.baseline_total_ms = verdict.get("baseline_total_ms", 0)
+            contract.skilled_total_ms = verdict.get("skilled_total_ms", 0)
+            contract.verdict_reason = verdict["reason"]
             job.status = JobStatus.COMPLETED
-            contract.eval_verdict = EvalVerdict.TECHNICAL_ERROR
-            contract.verdict_reason = "Skill SHA-256 hash mismatch against frozen contract."
-            await session.commit()
-            return
+            job.finished_at = datetime.now(timezone.utc)
+            await db.commit()
+        except Exception as exc:
+            await db.rollback()  # Prevent partial or selected evaluation rows from being accepted.
+            log.exception("Evaluation failed for job %s", job_id)
+            job = await db.get(EvaluationJob, job_id)
+            contract = await db.get(EvaluationContract, job.contract_id) if job else None
+            if job and contract and job.status == JobStatus.RUNNING:
+                job.last_error = type(exc).__name__
+                job.status = JobStatus.COMPLETED
+                job.finished_at = datetime.now(timezone.utc)
+                contract.eval_verdict = EvalVerdict.TECHNICAL_ERROR
+                contract.verdict_reason = "Worker failed: evaluation could not be completed"
+                await db.commit()
 
-        baseline_sys_prompt = dataset.baseline_agent_config.get(
-            "system_prompt",
-            "You extract product catalogue fields (sku, unit_quantity, pack_type) into JSON."
-        )
-        records = dataset.records_json
-        output_schema = dataset.output_schema_json
-        recorded_rows = []
 
-        for idx, rec in enumerate(records):
-            input_data = rec["input"]
-            checked_answer = rec["checked_answer"]
+async def expire_overdue_jobs():
+    """Fail closed for jobs stuck RUNNING after process crash or timeout.
 
-           
-            if idx % 2 == 0:
-                execution_order = "BASELINE_FIRST"
-                base_res = await call_local_ollama_fresh_context(
-                    contract.model_name, baseline_sys_prompt, input_data, output_schema
-                )
-                skill_res = await call_local_ollama_fresh_context(
-                    contract.model_name, baseline_sys_prompt, input_data, output_schema,
-                    skill.instructions_md, skill.examples_json
-                )
-            else:
-                execution_order = "SKILLED_FIRST"
-                skill_res = await call_local_ollama_fresh_context(
-                    contract.model_name, baseline_sys_prompt, input_data, output_schema,
-                    skill.instructions_md, skill.examples_json
-                )
-                base_res = await call_local_ollama_fresh_context(
-                    contract.model_name, baseline_sys_prompt, input_data, output_schema
-                )
+    Does not rerun selected records. The controller can then void the hold.
+    """
+    from datetime import timedelta
+    from sqlalchemy import update
+    now = datetime.now(timezone.utc)
+    ttl = get_settings()["MAX_JOB_RUNTIME_SECONDS"]
+    async with AsyncSessionLocal() as db:
+        rows = (await db.execute(select(EvaluationJob)
+                .where(EvaluationJob.status == JobStatus.RUNNING))).scalars().all()
+        for job in rows:
+            if not job.started_at:
+                continue
+            started = job.started_at.replace(tzinfo=timezone.utc) if job.started_at.tzinfo is None else job.started_at
+            if (now - started).total_seconds() <= ttl:
+                continue
+            c = await db.get(EvaluationContract, job.contract_id)
+            if not c or c.payment_state != PaymentState.AUTHORIZED or c.eval_verdict != EvalVerdict.PENDING:
+                continue
+            changed = await db.execute(update(EvaluationJob).where(
+                EvaluationJob.id == job.id, EvaluationJob.status == JobStatus.RUNNING,
+            ).values(status=JobStatus.COMPLETED,
+                     last_error="Evaluation job exceeded configured maximum duration",
+                     finished_at=now))
+            if changed.rowcount == 1:
+                c.eval_verdict = EvalVerdict.TECHNICAL_ERROR
+                c.verdict_reason = "Evaluation timed out; cancellation eligible"
+                await db.commit()
 
-            base_passed, base_err = DeterministicVerifier.check_single_output(
-                base_res["output"], checked_answer, output_schema
-            )
-            skill_passed, skill_err = DeterministicVerifier.check_single_output(
-                skill_res["output"], checked_answer, output_schema
-            )
-
-            comp_status, diff_summary = DeterministicVerifier.classify_record_pair(
-                base_passed, skill_passed
-            )
-
-            row_obj = EvaluationRecordResult(
-                id=f"rec_{uuid.uuid4().hex[:12]}",
-                contract_id=contract.id,
-                record_index=idx,
-                execution_order=execution_order,
-                input_data=input_data,
-                checked_answer=checked_answer,
-                baseline_output=base_res["output"],
-                baseline_error=base_res["error"] or base_err,
-                baseline_passed=base_passed,
-                baseline_tokens=base_res["tokens"],
-                baseline_ms=base_res["ms"],
-                skilled_output=skill_res["output"],
-                skilled_error=skill_res["error"] or skill_err,
-                skilled_passed=skill_passed,
-                skilled_tokens=skill_res["tokens"],
-                skilled_ms=skill_res["ms"],
-                comparison_status=comp_status,
-                diff_summary=diff_summary
-            )
-            session.add(row_obj)
-            recorded_rows.append({
-                "baseline_passed": base_passed,
-                "skilled_passed": skill_passed,
-                "comparison_status": comp_status,
-                "baseline_tokens": base_res["tokens"],
-                "skilled_tokens": skill_res["tokens"],
-                "baseline_ms": base_res["ms"],
-                "skilled_ms": skill_res["ms"],
-                "baseline_infra_error": base_res["infra_error"],
-                "skilled_infra_error": skill_res["infra_error"]
-            })
-
-       
-        summary = DeterministicVerifier.compute_contract_verdict(
-            recorded_rows, contract.scoring_rules_json
-        )
-
-        contract.eval_verdict = summary["verdict"]
-        contract.baseline_accuracy_pct = summary.get("baseline_accuracy_pct")
-        contract.skilled_accuracy_pct = summary.get("skilled_accuracy_pct")
-        contract.net_lift_pct = summary.get("net_lift_pct")
-        contract.improvements_count = summary.get("improvements_count", 0)
-        contract.regressions_count = summary.get("regressions_count", 0)
-        contract.baseline_total_tokens = summary.get("baseline_total_tokens", 0)
-        contract.skilled_total_tokens = summary.get("skilled_total_tokens", 0)
-        contract.baseline_total_ms = summary.get("baseline_total_ms", 0)
-        contract.skilled_total_ms = summary.get("skilled_total_ms", 0)
-        contract.verdict_reason = summary.get("reason")
-
-        job.status = JobStatus.COMPLETED
-        await session.commit()
-        print(f"[Worker] Completed Job {job.id} -> Verdict: {contract.eval_verdict.value} | {contract.verdict_reason}")
 
 async def poll_queue_forever():
-    print("[Worker] Isolated Evaluation Worker started (Zero PayPal credentials loaded). Polling queue...")
+    if engine.url.get_backend_name() != "postgresql":
+        raise RuntimeError("Run the evaluation worker with PostgreSQL; SQLite does not support SKIP LOCKED")
+    log.info("Started isolated worker (PayPal credentials not used)")
     while True:
-        claimed_job_id = None
-        async with AsyncSessionLocal() as session:
-            async with session.begin():
-                stmt = (
-                    select(EvaluationJob)
-                    .where(EvaluationJob.status == JobStatus.QUEUED)
-                    .with_for_update(skip_locked=True)
-                    .limit(1)
-                )
-                result = await session.execute(stmt)
-                job = result.scalar_one_or_none()
-                if job:
-                    job.status = JobStatus.RUNNING
-                    job.attempt_count += 1
-                    claimed_job_id = job.id
+        try:
+            job_id = await claim_next_job()
+            if job_id:
+                await process_single_job(job_id)
+            else:
+                await asyncio.sleep(2)
+        except Exception:
+            log.exception("Worker polling error")
+            await asyncio.sleep(3)
 
-        if claimed_job_id:
-            await process_single_job(claimed_job_id)
-        else:
-            await asyncio.sleep(2.0)
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     asyncio.run(poll_queue_forever())
