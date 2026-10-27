@@ -19,7 +19,7 @@ from models import ContractStatus, EvaluationContract, EvaluationDataset, SkillP
 router = APIRouter(prefix="/contracts", tags=["Contracts"])
 
 
-def calculate_terms_hash(terms: dict) -> str:
+def calculate_terms_hash(terms: dict | list) -> str:
     encoded = json.dumps(
         terms, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False
     ).encode("utf-8")
@@ -27,8 +27,8 @@ def calculate_terms_hash(terms: dict) -> str:
 
 
 class EvaluationRules(BaseModel):
-    min_records: int = Field(default_factory=lambda: get_settings()["MIN_EVAL_RECORDS"], ge=10, le=1000)
-    min_lift_pct: float = Field(default=20.0, ge=0.0, le=100.0)  # percentage points
+    min_records: int = Field(default_factory=lambda: get_settings()["MIN_EVAL_RECORDS"], ge=3, le=1000)
+    min_lift_pct: float = Field(default=20.0, ge=0.0, le=100.0)
     min_skilled_accuracy_pct: float = Field(default=80.0, ge=0.0, le=100.0)
     max_regressions: int = Field(default=0, ge=0, le=1000)
     max_tokens_per_record: int = Field(default=1500, ge=1, le=8192)
@@ -38,7 +38,6 @@ class EvaluationRules(BaseModel):
 
 
 class FailurePolicy(BaseModel):
-    # No automatic reruns in this safe MVP. Avoid selective reruns that inflate results.
     max_technical_retries: int = Field(default=0, ge=0, le=0)
     model_config = {"extra": "forbid"}
 
@@ -53,7 +52,7 @@ class ContractCreateRequest(BaseModel):
 
 
 class ContractApprovalRequest(BaseModel):
-    contract_version: int = Field(ge=1)
+    contract_version: int = Field(default=1, ge=1)
     terms_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
@@ -69,7 +68,12 @@ def validate_dataset_schema(ds: EvaluationDataset, min_records: int):
     if not isinstance(ds.records_json, list) or len(ds.records_json) < min_records:
         raise HTTPException(422, f"At least {min_records} checked records are required")
     for idx, row in enumerate(ds.records_json):
-        if not isinstance(row, dict) or not isinstance(row.get("input"), dict) or not isinstance(row.get("checked_answer"), dict) or not row["checked_answer"]:
+        if (
+            not isinstance(row, dict)
+            or not isinstance(row.get("input"), dict)
+            or not isinstance(row.get("checked_answer"), dict)
+            or not row["checked_answer"]
+        ):
             raise HTTPException(422, f"Record {idx} requires input and nonempty checked_answer objects")
         try:
             jsonschema.validate(row["checked_answer"], ds.output_schema_json)
@@ -145,20 +149,32 @@ async def create_contract(
         "licence_hash": hashlib.sha256(skill.licence_terms.encode("utf-8")).hexdigest(),
     }
     contract = EvaluationContract(
-        id=f"contract_{uuid.uuid4().hex}", buyer_id=current_user.id,
-        skill_id=skill.id, skill_version=skill.version,
+        id=f"contract_{uuid.uuid4().hex}",
+        buyer_id=current_user.id,
+        skill_id=skill.id,
+        skill_version=skill.version,
         skill_content_sha256=skill.content_sha256,
-        dataset_id=ds.id, dataset_sha256=ds.dataset_sha256,
-        model_name=model_name, scoring_rules_json=rules,
+        dataset_id=ds.id,
+        dataset_sha256=ds.dataset_sha256,
+        model_name=model_name,
+        scoring_rules_json=rules,
         failure_policy_json=request.failure_policy.model_dump(),
-        price_usd=price, currency="USD", contract_version=1,
-        terms_snapshot=terms, contract_sha256=calculate_terms_hash(terms),
+        price_usd=price,
+        currency="USD",
+        contract_version=1,
+        terms_snapshot=terms,
+        contract_sha256=calculate_terms_hash(terms),
         status=ContractStatus.DRAFT,
     )
     db.add(contract)
     await db.commit()
-    return {"contract_id": contract.id, "contract_version": 1,
-            "terms": terms, "terms_hash": contract.contract_sha256, "status": contract.status.value}
+    return {
+        "contract_id": contract.id,
+        "contract_version": 1,
+        "terms": terms,
+        "terms_hash": contract.contract_sha256,
+        "status": contract.status.value,
+    }
 
 
 @router.get("/{contract_id}")
@@ -171,11 +187,16 @@ async def get_contract(
     if contract is None:
         raise HTTPException(404, "Contract not found")
     require_buyer_owner(current_user, contract.buyer_id)
-    return {"contract_id": contract.id, "contract_version": contract.contract_version,
-            "terms": contract.terms_snapshot, "terms_hash": contract.contract_sha256,
-            "approved_terms_hash": contract.approved_terms_hash,
-            "status": contract.status.value, "payment_state": contract.payment_state.value,
-            "eval_verdict": contract.eval_verdict.value}
+    return {
+        "contract_id": contract.id,
+        "contract_version": contract.contract_version,
+        "terms": contract.terms_snapshot,
+        "terms_hash": contract.contract_sha256,
+        "approved_terms_hash": contract.approved_terms_hash,
+        "status": contract.status.value,
+        "payment_state": contract.payment_state.value,
+        "eval_verdict": contract.eval_verdict.value,
+    }
 
 
 @router.post("/{contract_id}/approve")
@@ -200,17 +221,26 @@ async def approve_contract(
         raise HTTPException(409, "This contract cannot be approved")
 
     result = await db.execute(
-        update(EvaluationContract).where(
+        update(EvaluationContract)
+        .where(
             EvaluationContract.id == contract.id,
             EvaluationContract.buyer_id == current_user.id,
             EvaluationContract.status == ContractStatus.DRAFT,
             EvaluationContract.contract_sha256 == expected_hash,
-        ).values(status=ContractStatus.FROZEN,
-                 approved_terms_hash=expected_hash, approved_at=datetime.now(timezone.utc))
+        )
+        .values(
+            status=ContractStatus.FROZEN,
+            approved_terms_hash=expected_hash,
+            approved_at=datetime.now(timezone.utc),
+        )
     )
     if result.rowcount != 1:
         await db.rollback()
         raise HTTPException(409, "Contract was approved or changed by another request")
     await db.commit()
-    return {"contract_id": contract_id, "contract_version": contract.contract_version,
-            "approved_terms_hash": expected_hash, "status": "FROZEN"}
+    return {
+        "contract_id": contract_id,
+        "contract_version": contract.contract_version,
+        "approved_terms_hash": expected_hash,
+        "status": "FROZEN",
+    }
