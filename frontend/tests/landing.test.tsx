@@ -2,10 +2,10 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
-import App from '../src/App'
-import { ThemeProvider } from '../src/hooks/useTheme'
-import { LandingPage } from '../src/pages/Landing/LandingPage'
-import { mockLandingService, previewFixture } from '../src/services/mock/landingService'
+import App from '../app.jsx'
+import { ThemeProvider } from '../app.jsx'
+import { LandingPage } from '../app.jsx'
+import { mockLandingService, previewFixture } from '../app.jsx'
 
 function mount(path = '/') { return render(<MemoryRouter initialEntries={[path]}><App /></MemoryRouter>) }
 

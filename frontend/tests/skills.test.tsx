@@ -2,10 +2,10 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
-import App from '../src/App'
-import { ThemeProvider } from '../src/hooks/useTheme'
-import { ExploreSkillsPage } from '../src/pages/Skills/ExploreSkillsPage'
-import { mockSkillService, skillCatalogFixture } from '../src/services/mock/skillService'
+import App from '../app.jsx'
+import { ThemeProvider } from '../app.jsx'
+import { ExploreSkillsPage } from '../app.jsx'
+import { mockSkillService, skillCatalogFixture } from '../app.jsx'
 
 describe('Explore skills', () => {
   it('filters by task and category together, with a recoverable empty state', async () => {

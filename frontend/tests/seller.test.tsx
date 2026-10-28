@@ -3,8 +3,8 @@ import { createHash, webcrypto } from 'node:crypto'
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
-import App from '../src/App'
-import { createSellerDraft, mockSellerService, sellerErrors, sellerListingFixtures, sellerPackageText } from '../src/services/mock/sellerService'
+import App from '../app.jsx'
+import { createSellerDraft, mockSellerService, sellerErrors, sellerListingFixtures, sellerPackageText } from '../app.jsx'
 
 beforeEach(() => vi.stubGlobal('crypto', webcrypto))
 afterEach(() => vi.unstubAllGlobals())
