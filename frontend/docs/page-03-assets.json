@@ -1,0 +1,18 @@
+[
+  {
+    "key": "invoice",
+    "prompt": "Use case: stylized-concept. Asset type: single transparent-background 3D skill catalogue illustration. Reference image is a STYLE AND OBJECT REFERENCE only, not an edit target. Recreate only the specified small object illustration from its card. Premium blue glass and navy glossy pedestal, photoreal materials, isometric three-quarter view, gentle studio light, softly fading shadow. Center the complete object within a square canvas, generous 8% clear padding, actual transparent alpha. No card, no website interface, no sidebar, no words or letters or numbers, no logos. Subject: upright ivory invoice sheet with abstract gray printed lines and translucent pale blue layered document panels on a low shiny navy square pedestal. Match the TOP LEFT card's artwork."
+  },
+  {
+    "key": "orders",
+    "prompt": "Use case: stylized-concept. Asset type: single transparent-background 3D skill catalogue illustration. Reference image is a STYLE AND OBJECT REFERENCE only, not an edit target. Recreate only the specified small object illustration from its card. Premium blue glass and navy glossy pedestal, photoreal materials, isometric three-quarter view, gentle studio light, softly fading shadow. Center the complete object within a square canvas, generous 8% clear padding, actual transparent alpha. No card, no website interface, no sidebar, no words or letters or numbers, no logos. Subject: a cluster of small realistic brown shipping boxes in front of one upright translucent blue glass checklist panel with abstract blue circles and horizontal lines, on a low shiny navy square pedestal. Match the TOP RIGHT card's artwork."
+  },
+  {
+    "key": "returns",
+    "prompt": "Use case: stylized-concept. Asset type: single transparent-background 3D skill catalogue illustration. Reference image is a STYLE AND OBJECT REFERENCE only, not an edit target. Recreate only the specified small object illustration from its card. Premium blue glass and navy glossy pedestal, photoreal materials, isometric three-quarter view, gentle studio light, softly fading shadow. Center the complete object within a square canvas, generous 8% clear padding, actual transparent alpha. No card, no website interface, no sidebar, no words or letters or numbers, no logos. Subject: one silver-blue shipping package with blue tape, a large curved cyan and blue return arrow over it and a faint translucent glass document panel behind, on a low shiny navy square pedestal. Match the LOWER LEFT card's artwork."
+  },
+  {
+    "key": "attributes",
+    "prompt": "Use case: stylized-concept. Asset type: single transparent-background 3D skill catalogue illustration. Reference image is a STYLE AND OBJECT REFERENCE only, not an edit target. Recreate only the specified small object illustration from its card. Premium blue glass and navy glossy pedestal, photoreal materials, isometric three-quarter view, gentle studio light, softly fading shadow. Center the complete object within a square canvas, generous 8% clear padding, actual transparent alpha. No card, no website interface, no sidebar, no words or letters or numbers, no logos. Subject: one realistic navy blue and white casual sneaker with white laces next to an upright translucent blue glass panel showing four abstract blue circles and horizontal lines, on a low shiny navy square pedestal. Match the LOWER RIGHT card's artwork."
+  }
+]
