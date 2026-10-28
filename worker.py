@@ -10,6 +10,7 @@ import os
 import time
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal
 
 import httpx
 from sqlalchemy import select, update
@@ -17,7 +18,7 @@ from database import AsyncSessionLocal, engine
 from contracts import calculate_terms_hash
 from models import (
     ContractStatus, EvaluationJob, EvaluationContract, SkillPackage,
-    EvaluationDataset, EvaluationRecordResult, JobStatus, EvalVerdict, PaymentState,
+    EvaluationDataset, EvaluationRecordResult, JobStatus, EvalVerdict, PaymentState, PurchaseMode,
 )
 from package_guard import PackageGuard
 from verifier import DeterministicVerifier
@@ -158,6 +159,25 @@ async def process_single_job(job_id: str) -> None:
                 raise RuntimeError("Dataset or baseline configuration changed after contract approval")
             if contract.model_name not in get_settings()["ALLOWED_OLLAMA_MODELS"]:
                 raise RuntimeError("Model is not allowlisted")
+            # VERIFIED_WORK only: confirm billing terms still match the approved contract.
+            if contract.purchase_mode == PurchaseMode.VERIFIED_WORK:
+                terms = contract.terms_snapshot
+                unit_price = contract.unit_price_usd
+                count = contract.max_billable_records
+                if (
+                    unit_price is None
+                    or not isinstance(count, int)
+                    or count < 1
+                    or terms.get("purchase_mode") != PurchaseMode.VERIFIED_WORK.value
+                    or terms.get("billing_rule") != "accepted_skilled_records_only"
+                    or terms.get("unit_price_usd") != format(unit_price, ".2f")
+                    or terms.get("max_billable_records") != count
+                    or count != len(ds.records_json)
+                    or unit_price <= 0
+                    or unit_price * count != contract.price_usd
+                    or terms.get("price") != format(contract.price_usd, ".2f")
+                ):
+                    raise RuntimeError("Frozen VERIFIED_WORK billing terms mismatch")
             old_rows = (
                 await db.execute(
                     select(EvaluationRecordResult.id).where(
@@ -234,7 +254,17 @@ async def process_single_job(job_id: str) -> None:
             await db.refresh(contract)
             if job.status != JobStatus.RUNNING or contract.payment_state != PaymentState.AUTHORIZED:
                 raise RuntimeError("Job was cancelled/timed out while evaluation was running")
-            verdict = DeterministicVerifier.compute_contract_verdict(results, contract.scoring_rules_json)
+            if contract.purchase_mode == PurchaseMode.VERIFIED_WORK:
+                verdict = DeterministicVerifier.compute_verified_work_verdict(
+                    results,
+                    contract.scoring_rules_json,
+                    Decimal(str(contract.unit_price_usd)),
+                    contract.max_billable_records,
+                )
+                contract.accepted_record_count = verdict["accepted_record_count"]
+                contract.payable_amount_usd = verdict["payable_amount_usd"]
+            else:
+                verdict = DeterministicVerifier.compute_contract_verdict(results, contract.scoring_rules_json)
             contract.eval_verdict = verdict["verdict"]
             contract.baseline_accuracy_pct = verdict.get("baseline_accuracy_pct")
             contract.skilled_accuracy_pct = verdict.get("skilled_accuracy_pct")
@@ -260,6 +290,9 @@ async def process_single_job(job_id: str) -> None:
                 job.finished_at = datetime.now(timezone.utc)
                 contract.eval_verdict = EvalVerdict.TECHNICAL_ERROR
                 contract.verdict_reason = "Worker failed: evaluation could not be completed"
+                if contract.purchase_mode == PurchaseMode.VERIFIED_WORK:
+                    contract.accepted_record_count = 0
+                    contract.payable_amount_usd = Decimal("0.00")
                 await db.commit()
 
 

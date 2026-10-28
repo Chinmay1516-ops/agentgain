@@ -20,6 +20,12 @@ class ContractStatus(str, enum.Enum):
     COMPLETED = "COMPLETED"
 
 
+# NEW: Which product the buyer is purchasing.
+class PurchaseMode(str, enum.Enum):
+    FULL_SKILL = "FULL_SKILL"
+    VERIFIED_WORK = "VERIFIED_WORK"
+
+
 class PaymentState(str, enum.Enum):
     UNINITIALIZED = "UNINITIALIZED"
     ORDER_CREATED = "ORDER_CREATED"
@@ -117,6 +123,12 @@ class EvaluationContract(Base):
     price_usd = Column(Numeric(10, 2), nullable=False)
     currency = Column(String(8), default="USD", nullable=False)
     failure_policy_json = Column(JSON, nullable=False)
+    # NEW: FULL_SKILL retains the current flow; VERIFIED_WORK bills accepted records.
+    purchase_mode = Column(Enum(PurchaseMode), default=PurchaseMode.FULL_SKILL, nullable=False)
+    unit_price_usd = Column(Numeric(10, 2), nullable=True)
+    max_billable_records = Column(Integer, nullable=True)
+    accepted_record_count = Column(Integer, nullable=True)
+    payable_amount_usd = Column(Numeric(10, 2), nullable=True)
     contract_version = Column(Integer, default=1, nullable=False)
     terms_snapshot = Column(JSON, nullable=False)
     status = Column(Enum(ContractStatus), default=ContractStatus.DRAFT, nullable=False)

@@ -1,5 +1,6 @@
 """Independent deterministic scorer. Never calls PayPal or chooses payment APIs."""
 import math
+from decimal import Decimal
 import jsonschema
 from models import EvalVerdict, RecordComparisonStatus
 
@@ -116,4 +117,65 @@ class DeterministicVerifier:
             "baseline_total_ms": ms_baseline,
             "skilled_total_ms": ms_skilled,
             "reason": "; ".join(reasons),
+        }
+
+    # NEW: VERIFIED_WORK only; FULL_SKILL scoring above is unchanged.
+    @staticmethod
+    def compute_verified_work_verdict(
+        record_results: list[dict],
+        scoring_rules: dict,
+        unit_price_usd: Decimal,
+        max_billable_records: int,
+    ) -> dict:
+        """Count accepted outputs and calculate their charge; never contact PayPal."""
+        if (
+            not isinstance(unit_price_usd, Decimal)
+            or not unit_price_usd.is_finite()
+            or unit_price_usd <= 0
+            or unit_price_usd != unit_price_usd.quantize(Decimal("0.01"))
+            or not isinstance(max_billable_records, int)
+            or max_billable_records < 1
+        ):
+            raise ValueError("Invalid frozen VERIFIED_WORK billing terms")
+
+        total = len(record_results)
+        if total != max_billable_records or total < scoring_rules["min_records"]:
+            return {
+                "verdict": EvalVerdict.INCONCLUSIVE,
+                "reason": "Work batch incomplete; no charge",
+                "accepted_record_count": 0,
+                "payable_amount_usd": Decimal("0.00"),
+            }
+        if any(r.get("baseline_infra_error") or r.get("skilled_infra_error") for r in record_results):
+            return {
+                "verdict": EvalVerdict.TECHNICAL_ERROR,
+                "reason": "Model/runtime failure; no charge",
+                "accepted_record_count": 0,
+                "payable_amount_usd": Decimal("0.00"),
+            }
+
+        token_cap = scoring_rules["max_tokens_per_record"]
+        accepted = sum(
+            r["skilled_passed"] and 0 <= int(r["skilled_tokens"]) <= token_cap
+            for r in record_results
+        )
+        payable = unit_price_usd * accepted
+        baseline_passes = sum(bool(r["baseline_passed"]) for r in record_results)
+        skilled_passes = sum(bool(r["skilled_passed"]) for r in record_results)
+        baseline_accuracy = round(100 * baseline_passes / total, 2)
+        skilled_accuracy = round(100 * skilled_passes / total, 2)
+        return {
+            "verdict": EvalVerdict.PASS if accepted > 0 else EvalVerdict.FAIL,
+            "reason": f"{accepted}/{total} records accepted; payable USD {payable:.2f}",
+            "accepted_record_count": accepted,
+            "payable_amount_usd": payable,
+            "baseline_accuracy_pct": baseline_accuracy,
+            "skilled_accuracy_pct": skilled_accuracy,
+            "net_lift_pct": round(skilled_accuracy - baseline_accuracy, 2),
+            "improvements_count": sum(r["comparison_status"] == RecordComparisonStatus.IMPROVED for r in record_results),
+            "regressions_count": sum(r["comparison_status"] == RecordComparisonStatus.REGRESSED for r in record_results),
+            "baseline_total_tokens": sum(int(r["baseline_tokens"]) for r in record_results),
+            "skilled_total_tokens": sum(int(r["skilled_tokens"]) for r in record_results),
+            "baseline_total_ms": sum(int(r["baseline_ms"]) for r in record_results),
+            "skilled_total_ms": sum(int(r["skilled_ms"]) for r in record_results),
         }

@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from auth import CurrentUser, require_role, require_buyer_owner
 from config import get_settings
 from database import get_db
-from models import ContractStatus, EvaluationContract, EvaluationDataset, SkillPackage
+from models import ContractStatus, EvaluationContract, EvaluationDataset, SkillPackage, PurchaseMode
 
 router = APIRouter(prefix="/contracts", tags=["Contracts"])
 
@@ -42,11 +42,19 @@ class FailurePolicy(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+class VerifiedWorkRules(BaseModel):
+    min_records: int = Field(default_factory=lambda: get_settings()["MIN_EVAL_RECORDS"], ge=3, le=1000)
+    max_tokens_per_record: int = Field(default=1500, ge=1, le=8192)
+    model_config = {"extra": "forbid"}
+
+
 class ContractCreateRequest(BaseModel):
     skill_id: str = Field(min_length=1)
     dataset_id: str = Field(min_length=1)
     model_name: str | None = None
-    evaluation_rules: EvaluationRules = Field(default_factory=EvaluationRules)
+    purchase_mode: PurchaseMode = PurchaseMode.FULL_SKILL
+    evaluation_rules: EvaluationRules | None = None
+    verified_work_rules: VerifiedWorkRules | None = None
     failure_policy: FailurePolicy = Field(default_factory=FailurePolicy)
     model_config = {"extra": "forbid"}
 
@@ -100,7 +108,15 @@ async def create_contract(
     if not skill.content_sha256:
         raise HTTPException(422, "Skill is missing package fingerprint")
 
-    rules = request.evaluation_rules.model_dump()
+    mode = request.purchase_mode
+    if mode == PurchaseMode.VERIFIED_WORK:
+        if request.evaluation_rules is not None:
+            raise HTTPException(422, "Use verified_work_rules for VERIFIED_WORK, not improvement rules")
+        rules = (request.verified_work_rules or VerifiedWorkRules()).model_dump()
+    else:
+        if request.verified_work_rules is not None:
+            raise HTTPException(422, "verified_work_rules are only valid for VERIFIED_WORK")
+        rules = (request.evaluation_rules or EvaluationRules()).model_dump()
     min_required = max(settings["MIN_EVAL_RECORDS"], rules["min_records"])
     rules["min_records"] = min_required
     validate_dataset_schema(ds, min_required)
@@ -130,6 +146,22 @@ async def create_contract(
     if not price.is_finite() or price <= 0 or price != price.quantize(Decimal("0.01")):
         raise HTTPException(422, "Skill price must be a positive two-decimal USD amount")
 
+    unit_price = None
+    max_billable_records = None
+    if mode == PurchaseMode.VERIFIED_WORK:
+        try:
+            unit_price = Decimal(str(policy["verified_work_unit_price_usd"]))
+        except (KeyError, InvalidOperation, TypeError, ValueError) as exc:
+            raise HTTPException(422, "Seller has not published a valid per-record price") from exc
+        if not unit_price.is_finite() or unit_price <= 0 or unit_price != unit_price.quantize(Decimal("0.01")):
+            raise HTTPException(422, "Per-record price must be a positive two-decimal USD amount")
+        max_billable_records = len(ds.records_json)
+        if max_billable_records > 1000:
+            raise HTTPException(422, "VERIFIED_WORK supports up to 1000 records per contract")
+        price = unit_price * max_billable_records
+        if price > Decimal("99999999.99"):
+            raise HTTPException(422, "Maximum authorized amount exceeds supported limit")
+
     terms = {
         "skill_id": skill.id,
         "skill_version": skill.version,
@@ -148,6 +180,13 @@ async def create_contract(
         "grader_version": "deterministic_v2",
         "licence_hash": hashlib.sha256(skill.licence_terms.encode("utf-8")).hexdigest(),
     }
+    if mode == PurchaseMode.VERIFIED_WORK:
+        terms.update({
+            "purchase_mode": mode.value,
+            "unit_price_usd": format(unit_price, ".2f"),
+            "max_billable_records": max_billable_records,
+            "billing_rule": "accepted_skilled_records_only",
+        })
     contract = EvaluationContract(
         id=f"contract_{uuid.uuid4().hex}",
         buyer_id=current_user.id,
@@ -161,6 +200,9 @@ async def create_contract(
         failure_policy_json=request.failure_policy.model_dump(),
         price_usd=price,
         currency="USD",
+        purchase_mode=mode,
+        unit_price_usd=unit_price,
+        max_billable_records=max_billable_records,
         contract_version=1,
         terms_snapshot=terms,
         contract_sha256=calculate_terms_hash(terms),

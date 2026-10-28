@@ -22,6 +22,7 @@ from database import AsyncSessionLocal, get_db
 from models import (
     ContractStatus, EvalVerdict, EvaluationContract, EvaluationJob,
     JobStatus, PaymentState, SkillPackage, WebhookEvent,
+    PurchaseMode, EvaluationRecordResult,
 )
 from package_guard import PackageGuard
 
@@ -34,6 +35,47 @@ def expected_amount(contract: EvaluationContract) -> str:
     if contract.currency != "USD" or amount <= 0 or amount != amount.quantize(Decimal("0.01")):
         raise HTTPException(409, "Unsupported or invalid frozen purchase amount")
     return format(amount, ".2f")
+
+
+# VERIFIED_WORK: the capture is the accepted-work bill, not the authorized maximum.
+def capture_amount(contract: EvaluationContract) -> str:
+    if contract.purchase_mode != PurchaseMode.VERIFIED_WORK:
+        return expected_amount(contract)
+    try:
+        unit = Decimal(str(contract.unit_price_usd))
+        bill = Decimal(str(contract.payable_amount_usd))
+        accepted = contract.accepted_record_count
+        maximum = contract.max_billable_records
+        if (
+            not unit.is_finite() or unit <= 0 or unit != unit.quantize(Decimal("0.01"))
+            or not isinstance(maximum, int) or maximum <= 0
+            or not isinstance(accepted, int) or not (0 < accepted <= maximum)
+            or bill != unit * accepted or not bill.is_finite()
+            or bill > Decimal(expected_amount(contract))
+            or unit * maximum != Decimal(expected_amount(contract))
+            or contract.eval_verdict != EvalVerdict.PASS
+        ):
+            raise ValueError("Verified-work billing does not match the approved maximum")
+    except (ValueError, TypeError, ArithmeticError) as exc:
+        raise HTTPException(409, "Verified-work payable amount is invalid") from exc
+    return format(bill, ".2f")
+
+
+async def verify_work_bill(db: AsyncSession, c: EvaluationContract) -> None:
+    """Check the frozen per-record bill against stored work results before capture/release."""
+    if c.purchase_mode != PurchaseMode.VERIFIED_WORK:
+        return
+    capture_amount(c)  # Validates positive value, agreed unit price, and max authorization.
+    rows = (await db.execute(
+        select(EvaluationRecordResult.skilled_passed, EvaluationRecordResult.skilled_tokens)
+        .where(EvaluationRecordResult.contract_id == c.id)
+    )).all()
+    if len(rows) != c.max_billable_records:
+        raise HTTPException(409, "Verified-work evaluation results are incomplete")
+    token_cap = c.scoring_rules_json["max_tokens_per_record"]
+    accepted = sum(bool(passed) and 0 <= tokens <= token_cap for passed, tokens in rows)
+    if accepted != c.accepted_record_count:
+        raise HTTPException(409, "Accepted record count does not match evaluation evidence")
 
 
 async def paypal_request(method: str, path: str, *, token: str,
@@ -97,6 +139,16 @@ def ensure_approved(contract: EvaluationContract):
             or terms.get("evaluation_rules") != contract.scoring_rules_json
             or terms.get("failure_policy") != contract.failure_policy_json):
         raise HTTPException(409, "Frozen purchase terms do not match the record")
+    # VERIFIED_WORK: only the approved per-record price may determine the later bill.
+    if contract.purchase_mode == PurchaseMode.VERIFIED_WORK:
+        if (terms.get("purchase_mode") != PurchaseMode.VERIFIED_WORK.value
+                or contract.unit_price_usd is None
+                or terms.get("unit_price_usd") != format(contract.unit_price_usd, ".2f")
+                or terms.get("max_billable_records") != contract.max_billable_records
+                or terms.get("billing_rule") != "accepted_skilled_records_only"
+                or contract.max_billable_records is None
+                or contract.unit_price_usd * contract.max_billable_records != contract.price_usd):
+            raise HTTPException(409, "Frozen verified-work billing terms do not match the contract")
 
 
 async def _owned_contract(db: AsyncSession, contract_id: str, buyer: CurrentUser) -> EvaluationContract:
@@ -124,7 +176,9 @@ def _release_receipt(c: EvaluationContract):
             and c.eval_verdict == EvalVerdict.PASS and c.paypal_capture_id):
         if not c.receipt_sha256:
             receipt = (f"{c.id}|{c.skill_content_sha256}|{c.contract_sha256}|"
-                       f"{c.paypal_capture_id}|{c.price_usd}|{c.currency}")
+                       f"{c.paypal_capture_id}|"
+                       f"{capture_amount(c) if c.purchase_mode == PurchaseMode.VERIFIED_WORK else c.price_usd}|"
+                       f"{c.currency}")
             c.receipt_sha256 = hashlib.sha256(receipt.encode("utf-8")).hexdigest()
             c.skill_delivered_at = datetime.now(timezone.utc)
             c.status = ContractStatus.COMPLETED
@@ -230,8 +284,9 @@ async def _capture_success(db: AsyncSession, c: EvaluationContract, cap: dict):
     if not cap.get("id") or cap.get("status") != "COMPLETED":
         return False
     if (cap.get("amount", {}).get("currency_code") != c.currency
-            or cap.get("amount", {}).get("value") != expected_amount(c)):
+            or cap.get("amount", {}).get("value") != capture_amount(c)):
         return False
+    await verify_work_bill(db, c)
     changed = await db.execute(update(EvaluationContract).where(
         EvaluationContract.id == c.id,
         EvaluationContract.payment_state.in_([PaymentState.CAPTURE_PENDING, PaymentState.CAPTURE_COMPLETED]),
@@ -266,6 +321,8 @@ async def settle_contract(db: AsyncSession, contract_id: str) -> dict:
         raise HTTPException(409, "Evaluation has not finished")
 
     capture = c.eval_verdict == EvalVerdict.PASS
+    if capture and c.purchase_mode == PurchaseMode.VERIFIED_WORK:
+        await verify_work_bill(db, c)
     pending = PaymentState.CAPTURE_PENDING if capture else PaymentState.VOID_PENDING
     key_name = "capture_request_id" if capture else "void_request_id"
     request_id = str(uuid.uuid4())
@@ -281,8 +338,11 @@ async def settle_contract(db: AsyncSession, contract_id: str) -> dict:
     await db.commit()  # Durable intent/idempotency key BEFORE contacting PayPal.
 
     if capture:
+        body = {"final_capture": True}
+        if c.purchase_mode == PurchaseMode.VERIFIED_WORK:
+            body["amount"] = {"currency_code": c.currency, "value": capture_amount(c)}
         result = await paypal_request("POST", f"/v2/payments/authorizations/{c.paypal_authorization_id}/capture",
-                                      token=token, request_id=request_id, body={"final_capture": True})
+                                       token=token, request_id=request_id, body=body)
         await db.refresh(c)
         ok = await _capture_success(db, c, result)
         return {"payment_state": "CAPTURE_COMPLETED" if ok else "CAPTURE_PENDING"}
@@ -388,6 +448,31 @@ async def get_tested_skill_and_receipt(contract_id: str,
                 "examples_json": skill.examples_json, "supported_tasks": skill.supported_tasks,
             }) != c.skill_content_sha256):
         raise HTTPException(409, "Skill does not match the tested package")
+    if c.purchase_mode == PurchaseMode.VERIFIED_WORK:
+        await verify_work_bill(db, c)
+        token_cap = c.scoring_rules_json["max_tokens_per_record"]
+        rows = (await db.execute(
+            select(EvaluationRecordResult)
+            .where(EvaluationRecordResult.contract_id == c.id,
+                   EvaluationRecordResult.skilled_passed.is_(True),
+                   EvaluationRecordResult.skilled_tokens <= token_cap)
+            .order_by(EvaluationRecordResult.record_index)
+        )).scalars().all()
+        return {
+            "receipt_sha256": c.receipt_sha256,
+            "contract_id": c.id,
+            "contract_sha256": c.contract_sha256,
+            "purchase_mode": PurchaseMode.VERIFIED_WORK.value,
+            "authorized_maximum_usd": expected_amount(c),
+            "captured_amount_usd": capture_amount(c),
+            "accepted_record_count": c.accepted_record_count,
+            "paypal_capture_id": c.paypal_capture_id,
+            # Do not deliver the seller's private instructions or examples.
+            "accepted_outputs": [
+                {"record_index": row.record_index, "output": row.skilled_output}
+                for row in rows
+            ],
+        }
     return {"receipt_sha256": c.receipt_sha256, "contract_id": c.id,
             "contract_sha256": c.contract_sha256,
             "skill_id": skill.id, "skill_version": skill.version,

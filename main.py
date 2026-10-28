@@ -20,7 +20,7 @@ from contracts import calculate_terms_hash, router as contracts_router
 from database import get_db, init_db
 from models import (
     SkillPackage, BuyerTaskFailure, EvaluationDataset, EvaluationContract,
-    PaymentState,
+    PaymentState, PurchaseMode,
 )
 from package_guard import PackageGuard
 from verifier import DeterministicVerifier
@@ -117,6 +117,16 @@ async def register_skill(req: SkillCreateRequest,
         raise HTTPException(422, "Invalid seller evaluation policy")
     if int(req.seller_eval_policy.get("min_records", 0)) < 0:
         raise HTTPException(422, "Invalid seller minimum records")
+    # VERIFIED_WORK: validate an optional seller-defined price per accepted record.
+    if "verified_work_unit_price_usd" in req.seller_eval_policy:
+        try:
+            unit_price = Decimal(str(req.seller_eval_policy["verified_work_unit_price_usd"]))
+        except (ValueError, ArithmeticError, TypeError) as exc:
+            raise HTTPException(422, "Invalid verified-work unit price") from exc
+        if (not unit_price.is_finite() or unit_price <= 0
+                or unit_price != unit_price.quantize(Decimal("0.01"))):
+            raise HTTPException(422, "Verified-work unit price must be positive USD cents")
+        req.seller_eval_policy["verified_work_unit_price_usd"] = format(unit_price, ".2f")
     content_hash = PackageGuard.validate_structured_skill(req.model_dump())
     if (await db.execute(select(SkillPackage.id).where(
         SkillPackage.content_sha256 == content_hash))).scalar_one_or_none():
@@ -266,6 +276,9 @@ async def retry_original_task(req: RetryOriginalTaskRequest,
         raise HTTPException(404, "Contract or original task not found")
     require_buyer_owner(buyer, contract.buyer_id)
     require_buyer_owner(buyer, failure.buyer_id)
+    # VERIFIED_WORK purchases deliver accepted outputs, not ongoing use of the seller's skill.
+    if contract.purchase_mode == PurchaseMode.VERIFIED_WORK:
+        raise HTTPException(403, "Verified-work purchases deliver accepted outputs, not the skill")
     if (contract.payment_state != PaymentState.CAPTURE_COMPLETED
             or not contract.receipt_sha256
             or contract.eval_verdict.value != "PASS"):
