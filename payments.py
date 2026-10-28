@@ -150,6 +150,17 @@ async def create_paypal_order(
     result = await paypal_request("POST", "/v2/checkout/orders", token=token,
                                   request_id=key, body={
         "intent": "AUTHORIZE",
+"payment_source": {
+    "paypal": {
+        "experience_context": {
+            "brand_name": "AgentGain",
+            "user_action": "PAY_NOW",
+            "shipping_preference": "NO_SHIPPING",
+            "return_url": "http://127.0.0.1:8000/docs",
+            "cancel_url": "http://127.0.0.1:8000/docs"
+        }
+    }
+},
         "purchase_units": [{
             "reference_id": c.id, "custom_id": c.id, "invoice_id": f"AG-{c.id}",
             "amount": {"currency_code": c.currency, "value": expected_amount(c)},
