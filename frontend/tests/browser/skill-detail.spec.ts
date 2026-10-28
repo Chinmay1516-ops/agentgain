@@ -51,6 +51,7 @@ test('invoice detail accessible tabs, themes and mobile layout', async ({ page }
     }
   }
   await page.getByRole('tab', { name: 'Overview', exact: true }).click()
+  await expect(page.getByRole('tabpanel')).toContainText('Extracts key fields from invoice text.')
   await page.screenshot({ path: 'docs/verification/page-04/night.png', fullPage: true })
   await page.setViewportSize({ width: 390, height: 844 }); await page.getByRole('radio', { name: 'Day', exact: true }).check()
   expect((await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze()).violations).toEqual([])

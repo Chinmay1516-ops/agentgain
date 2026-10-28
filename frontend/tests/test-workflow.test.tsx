@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
-import App from '../src/App'
-import { initialWorkflow, workflowReducer, demoOutcome, draftStorageKey, hasDemoDelivery } from '../src/hooks/useTestWorkflow'
-import { createTestDraft, illustrativeSummary } from '../src/services/mock/testFixtures'
-import { parseDraft, validateRecords, validateRules } from '../src/services/testValidation'
+import App from '../app.jsx'
+import { initialWorkflow, workflowReducer, demoOutcome, draftStorageKey, hasDemoDelivery } from '../app.jsx'
+import { createTestDraft, illustrativeSummary } from '../app.jsx'
+import { parseDraft, validateRecords, validateRules } from '../app.jsx'
 
 describe('Evaluation safeguards and data', () => {
   it('freezes the alternative example and derives its failed 80% result', () => {

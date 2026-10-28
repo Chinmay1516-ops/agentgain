@@ -2,10 +2,10 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
-import App from '../src/App'
-import { ThemeProvider } from '../src/hooks/useTheme'
-import { BuyerOverviewPage } from '../src/pages/Buyer/BuyerOverviewPage'
-import { buyerOverviewFixture, mockBuyerService } from '../src/services/mock/buyerService'
+import App from '../app.jsx'
+import { ThemeProvider } from '../app.jsx'
+import { BuyerOverviewPage } from '../app.jsx'
+import { buyerOverviewFixture, mockBuyerService } from '../app.jsx'
 
 function mount(path = '/buyer') { return render(<MemoryRouter initialEntries={[path]}><App /></MemoryRouter>) }
 

@@ -2,11 +2,11 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
-import App from '../src/App'
-import { ThemeProvider } from '../src/hooks/useTheme'
-import { SkillDetailPage } from '../src/pages/Skills/SkillDetailPage'
-import { invoiceSkillFixture, mockSkillService } from '../src/services/mock/skillService'
-import type { SkillDetailService } from '../src/services/contracts/skillService'
+import App from '../app.jsx'
+import { ThemeProvider } from '../app.jsx'
+import { SkillDetailPage } from '../app.jsx'
+import { invoiceSkillFixture, mockSkillService } from '../app.jsx'
+import type { SkillDetailService } from '../app.jsx'
 
 function mount(path = '/buyer/skills/invoice-field-extractor', service?: SkillDetailService) {
   return render(<MemoryRouter initialEntries={[path]}>{service ? <ThemeProvider><Routes><Route path="/buyer/skills/:skillId" element={<SkillDetailPage service={service} />} /></Routes></ThemeProvider> : <App />}</MemoryRouter>)
