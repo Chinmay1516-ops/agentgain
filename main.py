@@ -224,6 +224,9 @@ async def prepare_evaluation_dataset(req: DatasetUploadRequest,
         raise HTTPException(422, f"Invalid output schema: {exc.message}") from exc
     if not isinstance(req.baseline_agent_config.get("system_prompt"), str):
         raise HTTPException(422, "Baseline configuration requires system_prompt")
+    PackageGuard.check_buyer_inputs_for_extraction(
+        req.baseline_agent_config["system_prompt"], req.records_json
+    )
     for idx, row in enumerate(req.records_json):
         if (not isinstance(row.get("input"), dict)
                 or not isinstance(row.get("checked_answer"), dict)
