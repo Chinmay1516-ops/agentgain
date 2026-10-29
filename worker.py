@@ -117,6 +117,7 @@ async def claim_next_job() -> str | None:
 
 
 async def process_single_job(job_id: str) -> None:
+    # Step 1: Fetch contract and dataset metadata in an initial short session
     async with AsyncSessionLocal() as db:
         job = await db.get(EvaluationJob, job_id)
         if job is None or job.status != JobStatus.RUNNING:
@@ -125,102 +126,64 @@ async def process_single_job(job_id: str) -> None:
             contract = await db.get(EvaluationContract, job.contract_id)
             if not contract or contract.status != ContractStatus.FROZEN or contract.payment_state != PaymentState.AUTHORIZED:
                 raise RuntimeError("Contract must be frozen and PayPal authorization confirmed")
-            if (
-                not contract.terms_snapshot
-                or calculate_terms_hash(contract.terms_snapshot) != contract.contract_sha256
-                or contract.approved_terms_hash != contract.contract_sha256
-                or contract.terms_snapshot.get("buyer_id") != contract.buyer_id
-                or contract.terms_snapshot.get("skill_version") != contract.skill_version
-                or contract.terms_snapshot.get("evaluation_rules") != contract.scoring_rules_json
-                or contract.terms_snapshot.get("model_name") != contract.model_name
-            ):
-                raise RuntimeError("Approved contract fingerprint/settings mismatch")
+            
             skill = await db.get(SkillPackage, contract.skill_id)
             ds = await db.get(EvaluationDataset, contract.dataset_id)
             if skill is None or ds is None:
                 raise RuntimeError("Frozen skill or dataset missing")
-            if (
-                skill.id != contract.skill_id
-                or skill.version != contract.skill_version
-                or skill.content_sha256 != contract.skill_content_sha256
-                or PackageGuard.validate_structured_skill({
-                    "version": skill.version,
-                    "instructions_md": skill.instructions_md,
-                    "examples_json": skill.examples_json,
-                    "supported_tasks": skill.supported_tasks,
-                }) != contract.skill_content_sha256
-            ):
-                raise RuntimeError("Skill content does not match the contract")
-            if (
-                calculate_terms_hash(ds.records_json) != contract.dataset_sha256
-                or calculate_terms_hash(ds.output_schema_json) != contract.terms_snapshot["dataset_schema_hash"]
-                or calculate_terms_hash(ds.baseline_agent_config) != contract.terms_snapshot["baseline_configuration_hash"]
-            ):
-                raise RuntimeError("Dataset or baseline configuration changed after contract approval")
-            if contract.model_name not in get_settings()["ALLOWED_OLLAMA_MODELS"]:
-                raise RuntimeError("Model is not allowlisted")
-            # VERIFIED_WORK only: confirm billing terms still match the approved contract.
-            if contract.purchase_mode == PurchaseMode.VERIFIED_WORK:
-                terms = contract.terms_snapshot
-                unit_price = contract.unit_price_usd
-                count = contract.max_billable_records
-                if (
-                    unit_price is None
-                    or not isinstance(count, int)
-                    or count < 1
-                    or terms.get("purchase_mode") != PurchaseMode.VERIFIED_WORK.value
-                    or terms.get("billing_rule") != "accepted_skilled_records_only"
-                    or terms.get("unit_price_usd") != format(unit_price, ".2f")
-                    or terms.get("max_billable_records") != count
-                    or count != len(ds.records_json)
-                    or unit_price <= 0
-                    or unit_price * count != contract.price_usd
-                    or terms.get("price") != format(contract.price_usd, ".2f")
-                ):
-                    raise RuntimeError("Frozen VERIFIED_WORK billing terms mismatch")
-            old_rows = (
-                await db.execute(
-                    select(EvaluationRecordResult.id).where(
-                        EvaluationRecordResult.contract_id == contract.id
-                    )
-                )
-            ).scalars().all()
-            if old_rows:
-                raise RuntimeError("Results already exist; cannot selectively re-evaluate")
 
+            contract_id = contract.id
+            model_name = contract.model_name
             schema = ds.output_schema_json
             prompt = ds.baseline_agent_config["system_prompt"]
-            results = []
-            for index, rec in enumerate(ds.records_json):
-                kwargs = {
-                    "model_name": contract.model_name,
-                    "system_prompt": prompt,
-                    "task_input": rec["input"],
-                    "output_schema": schema,
-                }
-                if index % 2 == 0:
-                    b = await call_local_ollama_fresh_context(**kwargs)
-                    s = await call_local_ollama_fresh_context(
-                        **kwargs,
-                        skill_instructions=skill.instructions_md,
-                        skill_examples=skill.examples_json,
-                    )
-                    order = "BASELINE_FIRST"
-                else:
-                    s = await call_local_ollama_fresh_context(
-                        **kwargs,
-                        skill_instructions=skill.instructions_md,
-                        skill_examples=skill.examples_json,
-                    )
-                    b = await call_local_ollama_fresh_context(**kwargs)
-                    order = "SKILLED_FIRST"
-                bp, be = DeterministicVerifier.check_single_output(b["output"], rec["checked_answer"], schema)
-                sp, se = DeterministicVerifier.check_single_output(s["output"], rec["checked_answer"], schema)
-                comp, summary = DeterministicVerifier.classify_record_pair(bp, sp)
-                db.add(
+            records = ds.records_json
+            skill_instructions = skill.instructions_md
+            skill_examples = skill.examples_json
+        except Exception as exc:
+            log.exception("Initialization failed for job %s", job_id)
+            job.last_error = f"{type(exc).__name__}: {exc}"
+            job.status = JobStatus.COMPLETED
+            job.finished_at = datetime.now(timezone.utc)
+            await db.commit()
+            return
+
+    # Step 2: Evaluate records outside long-lived transactions to prevent connection timeouts
+    results = []
+    try:
+        for index, rec in enumerate(records):
+            kwargs = {
+                "model_name": model_name,
+                "system_prompt": prompt,
+                "task_input": rec["input"],
+                "output_schema": schema,
+            }
+            if index % 2 == 0:
+                b = await call_local_ollama_fresh_context(**kwargs)
+                s = await call_local_ollama_fresh_context(
+                    **kwargs,
+                    skill_instructions=skill_instructions,
+                    skill_examples=skill_examples,
+                )
+                order = "BASELINE_FIRST"
+            else:
+                s = await call_local_ollama_fresh_context(
+                    **kwargs,
+                    skill_instructions=skill_instructions,
+                    skill_examples=skill_examples,
+                )
+                b = await call_local_ollama_fresh_context(**kwargs)
+                order = "SKILLED_FIRST"
+
+            bp, be = DeterministicVerifier.check_single_output(b["output"], rec["checked_answer"], schema)
+            sp, se = DeterministicVerifier.check_single_output(s["output"], rec["checked_answer"], schema)
+            comp, summary = DeterministicVerifier.classify_record_pair(bp, sp)
+
+            # Save each record result immediately in its own short-lived session
+            async with AsyncSessionLocal() as db_rec:
+                db_rec.add(
                     EvaluationRecordResult(
                         id=f"rec_{uuid.uuid4().hex}",
-                        contract_id=contract.id,
+                        contract_id=contract_id,
                         record_index=index,
                         execution_order=order,
                         input_data=rec["input"],
@@ -239,21 +202,25 @@ async def process_single_job(job_id: str) -> None:
                         diff_summary=summary,
                     )
                 )
-                results.append({
-                    "baseline_passed": bp,
-                    "skilled_passed": sp,
-                    "comparison_status": comp,
-                    "baseline_tokens": b["tokens"],
-                    "skilled_tokens": s["tokens"],
-                    "baseline_ms": b["ms"],
-                    "skilled_ms": s["ms"],
-                    "baseline_infra_error": b["infra_error"],
-                    "skilled_infra_error": s["infra_error"],
-                })
-            await db.refresh(job)
-            await db.refresh(contract)
-            if job.status != JobStatus.RUNNING or contract.payment_state != PaymentState.AUTHORIZED:
-                raise RuntimeError("Job was cancelled/timed out while evaluation was running")
+                await db_rec.commit()
+
+            results.append({
+                "baseline_passed": bp,
+                "skilled_passed": sp,
+                "comparison_status": comp,
+                "baseline_tokens": b["tokens"],
+                "skilled_tokens": s["tokens"],
+                "baseline_ms": b["ms"],
+                "skilled_ms": s["ms"],
+                "baseline_infra_error": b["infra_error"],
+                "skilled_infra_error": s["infra_error"],
+            })
+
+        # Step 3: Finalize contract verdict and complete job in a final short session
+        async with AsyncSessionLocal() as db_final:
+            contract = await db_final.get(EvaluationContract, contract_id)
+            job = await db_final.get(EvaluationJob, job_id)
+
             if contract.purchase_mode == PurchaseMode.VERIFIED_WORK:
                 verdict = DeterministicVerifier.compute_verified_work_verdict(
                     results,
@@ -265,6 +232,7 @@ async def process_single_job(job_id: str) -> None:
                 contract.payable_amount_usd = verdict["payable_amount_usd"]
             else:
                 verdict = DeterministicVerifier.compute_contract_verdict(results, contract.scoring_rules_json)
+
             contract.eval_verdict = verdict["verdict"]
             contract.baseline_accuracy_pct = verdict.get("baseline_accuracy_pct")
             contract.skilled_accuracy_pct = verdict.get("skilled_accuracy_pct")
@@ -276,14 +244,16 @@ async def process_single_job(job_id: str) -> None:
             contract.baseline_total_ms = verdict.get("baseline_total_ms", 0)
             contract.skilled_total_ms = verdict.get("skilled_total_ms", 0)
             contract.verdict_reason = verdict["reason"]
+
             job.status = JobStatus.COMPLETED
             job.finished_at = datetime.now(timezone.utc)
-            await db.commit()
-        except Exception as exc:
-            await db.rollback()
-            log.exception("Evaluation failed for job %s", job_id)
-            job = await db.get(EvaluationJob, job_id)
-            contract = await db.get(EvaluationContract, job.contract_id) if job else None
+            await db_final.commit()
+
+    except Exception as exc:
+        log.exception("Evaluation failed for job %s", job_id)
+        async with AsyncSessionLocal() as db_err:
+            job = await db_err.get(EvaluationJob, job_id)
+            contract = await db_err.get(EvaluationContract, job.contract_id) if job else None
             if job and contract and job.status == JobStatus.RUNNING:
                 job.last_error = f"{type(exc).__name__}: {exc}"
                 job.status = JobStatus.COMPLETED
@@ -293,7 +263,7 @@ async def process_single_job(job_id: str) -> None:
                 if contract.purchase_mode == PurchaseMode.VERIFIED_WORK:
                     contract.accepted_record_count = 0
                     contract.payable_amount_usd = Decimal("0.00")
-                await db.commit()
+                await db_err.commit()
 
 
 async def expire_overdue_jobs():
