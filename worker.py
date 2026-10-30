@@ -92,7 +92,11 @@ async def call_local_ollama_fresh_context(
     except (httpx.HTTPError, ValueError, KeyError) as exc:
         return {
             "output": None,
-            "error": f"Local model service error: {type(exc).__name__}",
+            "error": (
+    f"Ollama HTTP {exc.response.status_code}: {exc.response.text[:500]}"
+    if isinstance(exc, httpx.HTTPStatusError)
+    else f"Local model service error: {type(exc).__name__}: {exc}"
+),
             "infra_error": True,
             "tokens": 0,
             "ms": max(int((time.perf_counter() - started) * 1000), 1),

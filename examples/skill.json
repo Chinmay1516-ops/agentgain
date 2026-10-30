@@ -1,0 +1,29 @@
+{
+  "version": "1.0.0",
+  "title": "Catalogue quantity normalizer",
+  "description": "Convert pack quantities into individual units. Evaluation determines whether it helps.",
+  "instructions_md": "Calculate total_units as packs multiplied by units_per_pack. A dozen is 12 units. Preserve sku exactly. Return only the required JSON object.",
+  "examples_json": [
+    {
+      "input": {
+        "sku": "A",
+        "packs": 2,
+        "units_per_pack": 12
+      },
+      "output": {
+        "sku": "A",
+        "total_units": 24
+      }
+    }
+  ],
+  "supported_tasks": [
+    "catalogue_quantity"
+  ],
+  "price_usd": "5.00",
+  "currency": "USD",
+  "licence_terms": "Sandbox demonstration licence.",
+  "seller_eval_policy": {
+    "min_records": 3,
+    "max_tokens_per_record": 1500
+  }
+}

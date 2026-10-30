@@ -3,6 +3,7 @@
 No fake PayPal IDs; no client-declared verdicts; irreversible decisions are
 persisted before the provider call. Any uncertain outcome remains pending.
 """
+import os
 import asyncio
 import hashlib
 import logging
@@ -210,8 +211,8 @@ async def create_paypal_order(
             "brand_name": "AgentGain",
             "user_action": "PAY_NOW",
             "shipping_preference": "NO_SHIPPING",
-            "return_url": "http://127.0.0.1:8000/docs",
-            "cancel_url": "http://127.0.0.1:8000/docs"
+            "return_url": os.getenv("PUBLIC_APP_URL", "http://127.0.0.1:8000").rstrip("/") + f"/app/integration.html?contract_id={c.id}&paypal_return=1",
+            "cancel_url": os.getenv("PUBLIC_APP_URL", "http://127.0.0.1:8000").rstrip("/") + f"/app/integration.html?contract_id={c.id}&paypal_cancel=1"
         }
     }
 },

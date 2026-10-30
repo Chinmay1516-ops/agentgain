@@ -1,0 +1,133 @@
+{
+  "records_json": [
+    {
+      "input": {
+        "sku": "HOLDOUT-1",
+        "packs": 2,
+        "units_per_pack": 12
+      },
+      "checked_answer": {
+        "sku": "HOLDOUT-1",
+        "total_units": 24
+      }
+    },
+    {
+      "input": {
+        "sku": "HOLDOUT-2",
+        "packs": 3,
+        "units_per_pack": 12
+      },
+      "checked_answer": {
+        "sku": "HOLDOUT-2",
+        "total_units": 36
+      }
+    },
+    {
+      "input": {
+        "sku": "HOLDOUT-3",
+        "packs": 4,
+        "units_per_pack": 12
+      },
+      "checked_answer": {
+        "sku": "HOLDOUT-3",
+        "total_units": 48
+      }
+    },
+    {
+      "input": {
+        "sku": "HOLDOUT-4",
+        "packs": 5,
+        "units_per_pack": 12
+      },
+      "checked_answer": {
+        "sku": "HOLDOUT-4",
+        "total_units": 60
+      }
+    },
+    {
+      "input": {
+        "sku": "HOLDOUT-5",
+        "packs": 6,
+        "units_per_pack": 12
+      },
+      "checked_answer": {
+        "sku": "HOLDOUT-5",
+        "total_units": 72
+      }
+    },
+    {
+      "input": {
+        "sku": "HOLDOUT-6",
+        "packs": 7,
+        "units_per_pack": 12
+      },
+      "checked_answer": {
+        "sku": "HOLDOUT-6",
+        "total_units": 84
+      }
+    },
+    {
+      "input": {
+        "sku": "HOLDOUT-7",
+        "packs": 8,
+        "units_per_pack": 12
+      },
+      "checked_answer": {
+        "sku": "HOLDOUT-7",
+        "total_units": 96
+      }
+    },
+    {
+      "input": {
+        "sku": "HOLDOUT-8",
+        "packs": 9,
+        "units_per_pack": 12
+      },
+      "checked_answer": {
+        "sku": "HOLDOUT-8",
+        "total_units": 108
+      }
+    },
+    {
+      "input": {
+        "sku": "HOLDOUT-9",
+        "packs": 10,
+        "units_per_pack": 12
+      },
+      "checked_answer": {
+        "sku": "HOLDOUT-9",
+        "total_units": 120
+      }
+    },
+    {
+      "input": {
+        "sku": "HOLDOUT-10",
+        "packs": 11,
+        "units_per_pack": 12
+      },
+      "checked_answer": {
+        "sku": "HOLDOUT-10",
+        "total_units": 132
+      }
+    }
+  ],
+  "output_schema_json": {
+    "type": "object",
+    "properties": {
+      "sku": {
+        "type": "string"
+      },
+      "total_units": {
+        "type": "integer"
+      }
+    },
+    "required": [
+      "sku",
+      "total_units"
+    ],
+    "additionalProperties": false
+  },
+  "baseline_agent_config": {
+    "system_prompt": "Normalize catalogue quantities. Return only JSON matching the schema."
+  }
+}
