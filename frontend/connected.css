@@ -1,0 +1,21 @@
+/* Layout additions reuse the supplied typography, colours and workspace styles. */
+.ag-live-bar{position:fixed;bottom:0;left:0;right:0;z-index:1500;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 24px;background:#122839;color:#fff;font:13px system-ui;box-shadow:0 -2px 12px #0002}.ag-live-bar button{background:#f1f8fc;border:0;border-radius:6px;padding:9px 15px;color:#122839;cursor:pointer}.ag-main{padding-bottom:100px!important;max-width:1400px}.ag-card{padding:26px;margin:22px 0}.ag-card h2{margin-bottom:16px}.ag-card p{margin:12px 0;line-height:1.6}.ag-card .seller-field{margin:16px 0;display:grid;gap:8px}.ag-card input,.ag-card textarea,.ag-card select,.ag-modal input{box-sizing:border-box;width:100%;padding:12px;border:1px solid #bacbd6;border-radius:7px;color:#152b3d;background:white;font:inherit}.ag-card textarea{font:13px/1.6 ui-monospace,monospace;resize:vertical}.ag-demo-note{background:#f6efd9;border-left:3px solid #b9983f;padding:12px 16px;font-size:14px}.ag-notice{background:#e4f0f5;padding:14px;border-radius:8px;overflow-wrap:anywhere}.ag-error{background:#fff0ef;color:#882d26;padding:14px;border-radius:7px}.ag-json{overflow:auto;padding:18px;background:#f3f6f8;font:13px/1.6 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere;max-height:550px}.ag-code{display:block;overflow-wrap:anywhere;font:12px/1.6 ui-monospace,monospace;margin:12px 0}.ag-skill-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px}.ag-skill-grid .ag-card{margin:0}.ag-list article{padding:20px 0;border-bottom:1px solid #d5dfe6}.ag-list article h3{margin-bottom:8px}.ag-actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:16px}.ag-actions .button{margin:0}.ag-card>.button{margin:10px 10px 10px 0}.ag-two{display:grid;grid-template-columns:1fr 1fr;gap:20px}.ag-check{display:flex;align-items:center;gap:12px;margin:20px 0}.ag-check input{width:20px;height:20px}.ag-metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin:22px 0}.ag-metrics>div{padding:20px;background:#f1f6f8;border-radius:8px;display:grid;gap:12px}.ag-metrics strong{font-size:32px}.ag-sidebar-foot{margin-top:30px;display:grid;gap:12px}.ag-sidebar-foot .button{font-size:12px;white-space:normal}.ag-hero{margin-bottom:30px}.ag-modal-backdrop{position:fixed;inset:0;z-index:2000;background:#092031aa;display:grid;place-items:center;padding:20px}.ag-modal{background:white;color:#152b3d;padding:30px;border-radius:16px;width:min(600px,100%);max-height:85vh;overflow:auto}.ag-modal h2{font-size:26px;margin-bottom:16px}.ag-modal p{line-height:1.6;margin:14px 0}.ag-modal .seller-field{display:grid;gap:8px;margin:18px 0}.ag-modal .button{margin-right:12px}.ag-main .seller-table th{white-space:normal;min-width:100px}.ag-main .seller-table td{vertical-align:top}.ag-main .button:disabled{opacity:.5;cursor:not-allowed}
+@media(max-width:760px){.ag-skill-grid,.ag-two{grid-template-columns:1fr}.ag-metrics{gap:8px}.ag-metrics>div{padding:12px}.ag-metrics strong{font-size:22px}.ag-live-bar{padding:8px 12px;font-size:11px}.ag-card{padding:18px}.ag-hero{display:block}.ag-sidebar-foot{margin-top:14px}}
+
+/* Fix unreadable sandbox banner */
+.buyer-app .ag-demo-note {
+  background-color: #fff4ce !important;
+  color: #493b12 !important;
+}
+
+/* Fix unreadable access notification */
+.buyer-app .ag-notice {
+  background-color: #e3f1f7 !important;
+  color: #14283d !important;
+}
+
+/* Fix contract JSON and payment evidence */
+.buyer-app .ag-json {
+  background-color: #f3f6f9 !important;
+  color: #14283d !important;
+}

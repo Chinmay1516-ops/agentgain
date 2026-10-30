@@ -1,5 +1,5 @@
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from sqlalchemy.orm import declarative_base
+from models import Base
 from config import get_settings
 
 settings = get_settings()
@@ -9,10 +9,9 @@ engine = create_async_engine(
     echo=False,
     pool_pre_ping=True,
     pool_recycle=300,
-    connect_args={
-        "timeout": 30.0,
-        "command_timeout": 60.0,
-    },
+    connect_args=({"timeout": 30.0, "command_timeout": 60.0}
+                  if settings["DATABASE_URL"].startswith("postgresql+asyncpg:")
+                  else {"timeout": 30.0}),
 )
 
 AsyncSessionLocal = async_sessionmaker(
@@ -21,7 +20,7 @@ AsyncSessionLocal = async_sessionmaker(
     expire_on_commit=False,
 )
 
-Base = declarative_base()
+
 
 async def init_db():
     async with engine.begin() as conn:
