@@ -53,4 +53,12 @@ def get_settings() -> dict:
         "PAYMENT_POLL_SECONDS": max(5, int(os.getenv("PAYMENT_POLL_SECONDS", "15"))),
         "PAYMENT_CONTROLLER_ENABLED": os.getenv("PAYMENT_CONTROLLER_ENABLED", "1") == "1",
         "MAX_JOB_RUNTIME_SECONDS": max(300, int(os.getenv("MAX_JOB_RUNTIME_SECONDS", "7200"))),
+
+        # NEW: OneIntent + Elastic
+        "ELASTICSEARCH_URL": os.getenv("ELASTICSEARCH_URL", "").strip(),
+        "KIBANA_URL": os.getenv("KIBANA_URL", "").strip(),
+        "ELASTIC_API_KEY": os.getenv("ELASTIC_API_KEY", "").strip(),
+        "ELASTIC_AGENT_ID": os.getenv("ELASTIC_AGENT_ID", "").strip(),
+        "ELASTIC_INTENTS_INDEX": os.getenv("ELASTIC_INTENTS_INDEX", "").strip(),
+        "ONEINTENT_ENABLED": os.getenv("ONEINTENT_ENABLED", "0") == "1",
     }

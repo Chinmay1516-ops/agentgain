@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from sqlalchemy import (
     Column, String, Integer, Numeric, Boolean, DateTime,
     ForeignKey, JSON, Text, Enum, UniqueConstraint,
+    Index, CheckConstraint, text,
 )
 from sqlalchemy.orm import declarative_base
 
@@ -24,6 +25,16 @@ class ContractStatus(str, enum.Enum):
 class PurchaseMode(str, enum.Enum):
     FULL_SKILL = "FULL_SKILL"
     VERIFIED_WORK = "VERIFIED_WORK"
+
+
+# ONEINTENT: Lifecycle of a requested purchase purpose.
+class IntentStatus(str, enum.Enum):
+    PENDING_REVIEW = "PENDING_REVIEW"
+    CLEARED = "CLEARED"
+    RESERVED = "RESERVED"
+    COMPLETED = "COMPLETED"
+    CANCELLED = "CANCELLED"
+    RELEASED = "RELEASED"
 
 
 class PaymentState(str, enum.Enum):
@@ -109,6 +120,25 @@ class EvaluationDataset(Base):
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
 
+# ONEINTENT: A buyer's intended purchase, before authorizing PayPal.
+class PurchaseIntent(Base):
+    __tablename__ = "purchase_intents"
+    id = Column(String(64), primary_key=True)
+    buyer_id = Column(String(64), nullable=False)
+    requesting_agent_id = Column(String(64), nullable=False)
+    request_id = Column(String(64), nullable=False)
+    purpose = Column(Text, nullable=False)
+    scope_key = Column(String(255), nullable=False)
+    scope_metadata_json = Column(JSON, nullable=False)
+    overlap_results_json = Column(JSON, nullable=True)
+    decision = Column(String(32), nullable=True)
+    status = Column(Enum(IntentStatus), default=IntentStatus.PENDING_REVIEW, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    __table_args__ = (
+        UniqueConstraint("buyer_id", "request_id", name="uq_buyer_intent_request"),
+    )
+
+
 class EvaluationContract(Base):
     __tablename__ = "evaluation_contracts"
     id = Column(String(64), primary_key=True)
@@ -123,7 +153,9 @@ class EvaluationContract(Base):
     price_usd = Column(Numeric(10, 2), nullable=False)
     currency = Column(String(8), default="USD", nullable=False)
     failure_policy_json = Column(JSON, nullable=False)
-    # NEW: FULL_SKILL retains the current flow; VERIFIED_WORK bills accepted records.
+    # ONEINTENT: Nullable to preserve existing purchases and both purchase modes.
+    intent_id = Column(String(64), ForeignKey("purchase_intents.id"), nullable=True)
+    #  FULL_SKILL retains the current flow; VERIFIED_WORK bills accepted records.
     purchase_mode = Column(Enum(PurchaseMode), default=PurchaseMode.FULL_SKILL, nullable=False)
     unit_price_usd = Column(Numeric(10, 2), nullable=True)
     max_billable_records = Column(Integer, nullable=True)
@@ -158,6 +190,28 @@ class EvaluationContract(Base):
     receipt_sha256 = Column(String(64), nullable=True, unique=True)
     skill_delivered_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)
+
+
+# ONEINTENT: An atomic checkout claim for a confirmed purchase need.
+class IntentReservation(Base):
+    __tablename__ = "intent_reservations"
+    id = Column(String(64), primary_key=True)
+    intent_id = Column(String(64), ForeignKey("purchase_intents.id"), nullable=False, unique=True)
+    buyer_id = Column(String(64), nullable=False)
+    reservation_key = Column(String(255), nullable=False)
+    contract_id = Column(String(64), ForeignKey("evaluation_contracts.id"), nullable=True, unique=True)
+    status = Column(String(16), default="ACTIVE", nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    __table_args__ = (
+        CheckConstraint("status IN ('ACTIVE', 'COMPLETED', 'RELEASED')", name="ck_reservation_status"),
+        Index(
+            "uq_buyer_live_reservation",
+            "buyer_id", "reservation_key",
+            unique=True,
+            postgresql_where=text("status IN ('ACTIVE', 'COMPLETED')"),
+            sqlite_where=text("status IN ('ACTIVE', 'COMPLETED')"),
+        ),
+    )
 
 
 class EvaluationJob(Base):

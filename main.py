@@ -27,6 +27,7 @@ from verifier import DeterministicVerifier
 from worker import call_local_ollama_fresh_context, claim_next_job, process_single_job
 from payments import router as payments_router, payment_controller_loop
 from analytics import router as analytics_router
+from intent_guard import router as intent_router  # ONEINTENT
 
 
 @asynccontextmanager
@@ -328,3 +329,4 @@ async def retry_original_task(req: RetryOriginalTaskRequest,
 app.include_router(contracts_router)
 app.include_router(payments_router)
 app.include_router(analytics_router)
+app.include_router(intent_router)  # ONEINTENT

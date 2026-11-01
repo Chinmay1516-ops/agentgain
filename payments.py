@@ -23,7 +23,7 @@ from database import AsyncSessionLocal, get_db
 from models import (
     ContractStatus, EvalVerdict, EvaluationContract, EvaluationJob,
     JobStatus, PaymentState, SkillPackage, WebhookEvent,
-    PurchaseMode, EvaluationRecordResult,
+    PurchaseMode, EvaluationRecordResult, PurchaseIntent, IntentReservation, IntentStatus,
 )
 from package_guard import PackageGuard
 
@@ -161,6 +161,62 @@ async def _owned_contract(db: AsyncSession, contract_id: str, buyer: CurrentUser
     return c
 
 
+# ONEINTENT: Require a buyer-approved, active reservation for new checkout.
+async def require_intent_reservation(db: AsyncSession, c: EvaluationContract) -> None:
+    if not c.intent_id:
+        raise HTTPException(409, "OneIntent purchase reservation is required")
+
+    intent = await db.get(PurchaseIntent, c.intent_id)
+    reservation = (await db.execute(
+        select(IntentReservation).where(IntentReservation.intent_id == c.intent_id)
+    )).scalar_one_or_none()
+
+    terms = c.terms_snapshot
+    if (
+        intent is None or reservation is None
+        or intent.buyer_id != c.buyer_id
+        or intent.status != IntentStatus.RESERVED
+        or intent.decision not in ("PROCEED", "BUY_BOTH")
+        or reservation.buyer_id != c.buyer_id
+        or reservation.contract_id != c.id
+        or reservation.status != "ACTIVE"
+        or not isinstance(terms, dict)
+        or terms.get("intent_id") != intent.id
+        or terms.get("intent_scope_key") != intent.scope_key
+        or terms.get("intent_purpose") != intent.purpose
+        or terms.get("requesting_agent_id") != intent.requesting_agent_id
+    ):
+        raise HTTPException(409, "OneIntent reservation is missing or does not match the approved contract")
+
+
+# ONEINTENT: Follow only confirmed PayPal outcomes; uncertain outcomes stay reserved.
+async def finalize_intent_reservation(db: AsyncSession, c: EvaluationContract, paid: bool) -> None:
+    if not c.intent_id:
+        return  # Historical purchases are unaffected.
+
+    intent = await db.get(PurchaseIntent, c.intent_id)
+    reservation = (await db.execute(
+        select(IntentReservation).where(IntentReservation.intent_id == c.intent_id)
+    )).scalar_one_or_none()
+    if (
+        intent is None or reservation is None
+        or intent.buyer_id != c.buyer_id
+        or reservation.contract_id != c.id
+        or reservation.buyer_id != c.buyer_id
+    ):
+        raise HTTPException(409, "OneIntent reservation does not match this purchase")
+
+    reservation_status = "COMPLETED" if paid else "RELEASED"
+    intent_status = IntentStatus.COMPLETED if paid else IntentStatus.RELEASED
+    if reservation.status == reservation_status and intent.status == intent_status:
+        return
+    if reservation.status != "ACTIVE" or intent.status != IntentStatus.RESERVED:
+        raise HTTPException(409, "OneIntent reservation cannot make this transition")
+
+    reservation.status = reservation_status
+    intent.status = intent_status
+
+
 async def _request_key(db: AsyncSession, contract_id: str, column) -> str:
     new_key = str(uuid.uuid4())
     await db.execute(update(EvaluationContract).where(
@@ -200,6 +256,8 @@ async def create_paypal_order(
                      if a.get("rel") in ("approve", "payer-action")), None)
         return {"contract_id": c.id, "paypal_order_id": c.paypal_order_id,
                 "approval_url": link, "payment_state": c.payment_state.value}
+    if c.intent_id or get_settings()["ONEINTENT_ENABLED"]:
+        await require_intent_reservation(db, c)
     token = await get_paypal_token()
     key = await _request_key(db, c.id, EvaluationContract.create_request_id)
     result = await paypal_request("POST", "/v2/checkout/orders", token=token,
@@ -250,6 +308,8 @@ async def authorize_paypal_order(
         return {"authorization_id": c.paypal_authorization_id, "payment_state": "AUTHORIZED"}
     if c.payment_state != PaymentState.ORDER_CREATED or not c.paypal_order_id:
         raise HTTPException(409, "No buyer-approved order ready for authorization")
+    if c.intent_id:
+        await require_intent_reservation(db, c)
     token = await get_paypal_token()
     key = await _request_key(db, c.id, EvaluationContract.authorize_request_id)
     result = await paypal_request("POST", f"/v2/checkout/orders/{c.paypal_order_id}/authorize",
@@ -298,9 +358,9 @@ async def _capture_success(db: AsyncSession, c: EvaluationContract, cap: dict):
     if changed.rowcount != 1:
         await db.rollback()
         return False
-    await db.commit()
     await db.refresh(c)
     _release_receipt(c)
+    await finalize_intent_reservation(db, c, paid=True)
     await db.commit()
     return True
 
@@ -317,6 +377,8 @@ async def settle_contract(db: AsyncSession, contract_id: str) -> dict:
         return {"payment_state": c.payment_state.value, "message": "Pending; reconcile"}
     if c.payment_state != PaymentState.AUTHORIZED or not c.paypal_authorization_id:
         raise HTTPException(409, "Payment has not been authorized")
+    if c.intent_id:
+        await require_intent_reservation(db, c)
     job = (await db.execute(select(EvaluationJob).where(EvaluationJob.contract_id == c.id))).scalar_one_or_none()
     if not job or job.status != JobStatus.COMPLETED or c.eval_verdict == EvalVerdict.PENDING:
         raise HTTPException(409, "Evaluation has not finished")
@@ -357,6 +419,8 @@ async def settle_contract(db: AsyncSession, contract_id: str) -> dict:
             EvaluationContract.id == c.id,
             EvaluationContract.payment_state == PaymentState.VOID_PENDING,
         ).values(payment_state=PaymentState.VOIDED))
+        if changed.rowcount == 1:
+            await finalize_intent_reservation(db, c, paid=False)
         await db.commit()
         if changed.rowcount == 1:
             return {"payment_state": "VOIDED"}
@@ -374,9 +438,11 @@ async def reconcile_contract(db: AsyncSession, contract_id: str) -> dict:
     if c.payment_state == PaymentState.VOID_PENDING:
         auth = await paypal_request("GET", f"/v2/payments/authorizations/{c.paypal_authorization_id}", token=token)
         if auth.get("status") == "VOIDED":
-            await db.execute(update(EvaluationContract).where(
+            changed = await db.execute(update(EvaluationContract).where(
                 EvaluationContract.id == c.id, EvaluationContract.payment_state == PaymentState.VOID_PENDING,
             ).values(payment_state=PaymentState.VOIDED))
+            if changed.rowcount == 1:
+                await finalize_intent_reservation(db, c, paid=False)
             await db.commit()
             return {"payment_state": "VOIDED"}
         if auth.get("status") == "CREATED" and c.void_request_id:
@@ -388,10 +454,12 @@ async def reconcile_contract(db: AsyncSession, contract_id: str) -> dict:
             auth = await paypal_request("GET",
                 f"/v2/payments/authorizations/{c.paypal_authorization_id}", token=token)
             if auth.get("status") == "VOIDED":
-                await db.execute(update(EvaluationContract).where(
+                changed = await db.execute(update(EvaluationContract).where(
                     EvaluationContract.id == c.id,
                     EvaluationContract.payment_state == PaymentState.VOID_PENDING,
                 ).values(payment_state=PaymentState.VOIDED))
+                if changed.rowcount == 1:
+                    await finalize_intent_reservation(db, c, paid=False)
                 await db.commit()
                 return {"payment_state": "VOIDED"}
         return {"payment_state": "VOID_PENDING", "provider_status": auth.get("status")}

@@ -8,13 +8,13 @@ from decimal import Decimal, InvalidOperation
 import jsonschema
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import CurrentUser, require_role, require_buyer_owner
 from config import get_settings
 from database import get_db
-from models import ContractStatus, EvaluationContract, EvaluationDataset, SkillPackage, PurchaseMode
+from models import ContractStatus, EvaluationContract, EvaluationDataset, SkillPackage, PurchaseMode, PurchaseIntent, IntentStatus
 
 router = APIRouter(prefix="/contracts", tags=["Contracts"])
 
@@ -51,6 +51,7 @@ class VerifiedWorkRules(BaseModel):
 class ContractCreateRequest(BaseModel):
     skill_id: str = Field(min_length=1)
     dataset_id: str = Field(min_length=1)
+    intent_id: str | None = None  # ONEINTENT: set when using guarded checkout
     model_name: str | None = None
     purchase_mode: PurchaseMode = PurchaseMode.FULL_SKILL
     evaluation_rules: EvaluationRules | None = None
@@ -103,6 +104,28 @@ async def create_contract(
     if skill is None or ds is None:
         raise HTTPException(404, "Skill or dataset not found")
     require_buyer_owner(current_user, ds.buyer_id)
+
+    # ONEINTENT: require a cleared, buyer-owned purchase purpose when enabled.
+    intent = None
+    if settings["ONEINTENT_ENABLED"]:
+        if not request.intent_id:
+            raise HTTPException(422, "A cleared OneIntent purchase intent is required")
+        intent = await db.get(PurchaseIntent, request.intent_id)
+        if intent is None:
+            raise HTTPException(404, "Purchase intent not found")
+        require_buyer_owner(current_user, intent.buyer_id)
+        if (intent.status != IntentStatus.CLEARED
+                or intent.decision not in ("PROCEED", "BUY_BOTH")
+                or not isinstance(intent.overlap_results_json, dict)):
+            raise HTTPException(409, "Purchase intent must pass review and buyer approval first")
+        linked = (await db.execute(
+            select(EvaluationContract.id).where(EvaluationContract.intent_id == intent.id).limit(1)
+        )).scalar_one_or_none()
+        if linked is not None:
+            raise HTTPException(409, "Purchase intent is already linked to a contract")
+    elif request.intent_id is not None:
+        raise HTTPException(409, "OneIntent is disabled")
+
     if skill.seller_id != settings["SELLER_ID"]:
         raise HTTPException(403, "Only the configured demo merchant's skills are supported")
     if not skill.content_sha256:
@@ -187,8 +210,17 @@ async def create_contract(
             "max_billable_records": max_billable_records,
             "billing_rule": "accepted_skilled_records_only",
         })
+    if intent is not None:
+        # Include the approved purchase purpose in the frozen terms hash.
+        terms.update({
+            "intent_id": intent.id,
+            "intent_scope_key": intent.scope_key,
+            "intent_purpose": intent.purpose,
+            "requesting_agent_id": intent.requesting_agent_id,
+        })
     contract = EvaluationContract(
         id=f"contract_{uuid.uuid4().hex}",
+        intent_id=intent.id if intent is not None else None,
         buyer_id=current_user.id,
         skill_id=skill.id,
         skill_version=skill.version,
