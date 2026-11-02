@@ -209,6 +209,11 @@ async def review_purchase_overlap(intent, candidates: list) -> list[dict]:
             ][:25]
 
         except (httpx.HTTPError, KeyError, ValueError, TypeError) as exc:
-            raise IntentAgentError(
-                "Elastic agent review failed or returned invalid JSON"
-            ) from exc
+            detail = type(exc).__name__
+
+    if isinstance(exc, httpx.HTTPStatusError):
+        detail += f" (HTTP {exc.response.status_code})"
+
+    raise IntentAgentError(
+        f"Elastic agent review failed: {detail}"
+    ) from exc

@@ -166,13 +166,33 @@ async def check_overlap(
     user: CurrentUser = Depends(require_role("buyer")),
 ):
     require_oneintent_enabled()
+    await lock_buyer(db, user.id)
 
     intent = await get_owned_intent(db, intent_id, user)
 
-    if intent.status != IntentStatus.PENDING_REVIEW:
-        raise HTTPException(409, "Intent is not pending review")
+    if intent.status not in (IntentStatus.PENDING_REVIEW, IntentStatus.CLEARED):
+        raise HTTPException(
+            409,
+            f"Intent is {intent.status.value}; only pending or cleared "
+            "unreserved intents can be checked",
+        )
+
+    existing_reservation = (
+        await db.execute(
+            select(IntentReservation).where(
+                IntentReservation.intent_id == intent.id
+            )
+        )
+    ).scalar_one_or_none()
+    if existing_reservation is not None:
+        raise HTTPException(409, "Intent has a reservation; it cannot be rechecked")
 
     candidates = await find_other_intents(db, intent)
+
+    # A new check requires a new buyer decision, even if no overlaps are found.
+    intent.status = IntentStatus.PENDING_REVIEW
+    intent.decision = None
+    intent.overlap_results_json = {}
 
     try:
         await index_intent(intent)
@@ -193,6 +213,8 @@ async def check_overlap(
         matches = await review_purchase_overlap(intent, candidates)
 
     except IntentAgentError as exc:
+        # Persist invalidation so a failed recheck cannot reuse old clearance.
+        await db.commit()
         raise HTTPException(503, str(exc)) from exc
 
     found_ids = {item["intent_id"] for item in matches}
@@ -235,7 +257,14 @@ async def resolve_overlap(
     intent = await get_owned_intent(db, intent_id, user)
     review = intent.overlap_results_json
 
-    if intent.status != IntentStatus.PENDING_REVIEW or not review:
+    if intent.status != IntentStatus.PENDING_REVIEW:
+        raise HTTPException(
+            409,
+            f"Intent is already {intent.status.value}; decision cannot be "
+            "submitted again. Use GET /intents/{intent_id} to view its status",
+        )
+
+    if not review:
         raise HTTPException(409, "Check overlaps first")
 
     candidates = await find_other_intents(db, intent)
@@ -350,7 +379,11 @@ async def reserve_intent(
         set(intent.overlap_results_json["reviewed_ids"])
         != {c.id for c in candidates}
     ):
-        raise HTTPException(409, "New purchase detected; review again")
+        raise HTTPException(
+            409,
+            "Purchase list changed; call /intents/{intent_id}/check, "
+            "submit a new decision with /resolve, then retry /reserve",
+        )
 
     reservation = IntentReservation(
         id=f"res_{uuid.uuid4().hex}",
