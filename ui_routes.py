@@ -18,7 +18,8 @@ def public_skill(s):
 async def ui_config():
     settings=get_settings()
     return {'mode':'DEMO_NO_PAYMENT','models':settings['ALLOWED_OLLAMA_MODELS'],
-            'min_eval_records':settings['MIN_EVAL_RECORDS']}
+            'min_eval_records':settings['MIN_EVAL_RECORDS'],
+            'oneintent_enabled':bool(settings['ONEINTENT_ENABLED'])}
 
 @router.get('/api/me')
 async def me(user: CurrentUser=Depends(get_current_user)):

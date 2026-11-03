@@ -1,4 +1,664 @@
-import {createConnectedScreens} from '/app/connected.js';
+/* AgentGain frontend consolidation. Original bundled React app + exact CSS + OneIntent patch. No asset files modified. */
+(function () {
+const __view = new URLSearchParams(location.search).get("view") || (location.pathname.endsWith("/agent-purchases.html") ? "oneintent" : location.pathname.endsWith("/demo.html") ? "demo" : location.pathname.endsWith("/integration.html") ? "integration" : "");
+
+function __loadExternal(src) {
+  return new Promise((resolve, reject) => {
+    const element = document.createElement('script');
+    element.src = src;
+    element.async = true;
+    element.onload = () => resolve(src);
+    element.onerror = () => reject(new Error('Unable to load ' + src));
+    document.head.appendChild(element);
+  });
+}
+function __renderSpecial(bodyHtml, cssText, pageTitle) {
+  document.title = pageTitle;
+  // The standalone console CSS does not mix with the original React style cascade.
+  const originalStyle = document.getElementById('ag-original-styles');
+  originalStyle.disabled = Boolean(cssText);
+  if (cssText) {
+    const style = document.createElement('style');
+    style.textContent = cssText;
+    document.head.appendChild(style);
+  }
+  document.body.innerHTML = bodyHtml;
+}
+if (__view === "oneintent") {
+__renderSpecial("<div class=\"buyer-app oi-app\">\n  <aside class=\"buyer-sidebar\">\n    <a class=\"buyer-brand\" href=\"/\">◈ AgentGain</a>\n    <p class=\"sidebar-label\">BUYER WORKSPACE</p>\n    <nav class=\"buyer-nav\" aria-label=\"Buyer pages\">\n      <a href=\"/buyer\">Overview</a>\n      <a href=\"/buyer/skills\">Explore skills</a>\n      <a href=\"/buyer/evaluations/new\">Prepare evaluation</a>\n      <a class=\"active\" href=\"/?view=oneintent\" aria-current=\"page\">Agent Purchases</a>\n    </nav>\n    <div class=\"ag-sidebar-foot\"><a class=\"button button--outline\" href=\"/buyer\">Back to workspace</a></div>\n  </aside>\n  <div class=\"buyer-body\">\n    <header class=\"buyer-topbar\"><strong>OneIntent · Agent Purchases</strong><span class=\"buyer-demo-label\">PayPal sandbox · buyer-controlled</span></header>\n    <main class=\"ag-main oi-main\">\n      <div class=\"oi-heading\"><div><p class=\"oi-eyebrow\">AGENTGAIN / BUYER</p><h1>Delegate to many agents. Pay once for each intent.</h1><p>Compare independent purchasing requests before PayPal authorisation. The buyer decides; an AI similarity score never cancels purchases automatically.</p></div><button class=\"button button--outline\" id=\"refresh\" type=\"button\">Refresh records</button></div>\n      <div id=\"message\" class=\"oi-message\" role=\"status\" aria-live=\"polite\">Connect your buyer token to load records.</div>\n      <section class=\"oi-panel oi-connection\"><h2>Buyer demo access</h2><div class=\"oi-inline\"><label for=\"token\">Buyer token</label><input id=\"token\" type=\"password\" autocomplete=\"off\" placeholder=\"Paste DEMO_BUYER_TOKEN\"><button class=\"button button--primary\" id=\"connect\" type=\"button\">Connect</button></div><p>Token is held only in this page's memory, not local storage. You will reconnect if you reload or navigate away.</p></section>\n      <section class=\"oi-panel\"><div class=\"oi-section-header\"><div><h2>1. Submit an agent purchase request</h2><p>Submit two different agent requests to see OneIntent compare their purposes.</p></div></div>\n        <form id=\"new-intent\" class=\"oi-form\">\n          <label>Agent ID<input name=\"agent\" required maxlength=\"64\" value=\"assistant-a\" placeholder=\"assistant-a\"></label>\n          <label>Purchase scope / batch<input name=\"scope\" required maxlength=\"200\" value=\"nov-01-invoices\" placeholder=\"nov-01-invoices\"></label>\n          <label class=\"oi-wide\">Purchase purpose<input name=\"purpose\" required minlength=\"5\" maxlength=\"500\" value=\"Extract the invoices in batch NOV-01 for Company A\" placeholder=\"Describe what the buyer actually wants\"></label>\n          <label>Recipient / project<input name=\"recipient\" maxlength=\"100\" value=\"Company A\" placeholder=\"Company A\"></label>\n          <label>Skill to evaluate<select name=\"skill\"><option value=\"\">Choose later</option></select></label>\n          <div class=\"oi-form-actions\"><button class=\"button button--primary\" type=\"submit\" id=\"create\">Record purchase intent</button><span>Submitting does not create a contract or PayPal order.</span></div>\n        </form>\n      </section>\n      <section class=\"oi-panel\"><div class=\"oi-section-header\"><div><h2>2. Agent purchase control centre</h2><p>AG Grid · search, sort and select a real purchase request for conflict review.</p></div><label class=\"oi-search\">Search<input type=\"search\" id=\"grid-search\" placeholder=\"Agent, purpose, scope…\"></label></div><div id=\"purchase-grid\" class=\"oi-grid\" aria-label=\"Purchase intents grid\"></div><p class=\"oi-footnote\">Only your buyer's records are displayed. Select a row to review its underlying decision and links.</p></section>\n      <section class=\"oi-panel\" id=\"review-panel\"><div class=\"oi-section-header\"><div><h2>3. Review evidence and decide</h2><p>OneIntent analysis → supporting purchase record → explicit buyer decision.</p></div></div>\n        <div id=\"selection-empty\" class=\"oi-empty\">Select a purchase from AG Grid above to see its evidence and decision options.</div>\n        <div id=\"selection-content\" hidden>\n          <div class=\"oi-detail-header\"><div><span class=\"oi-overline\">SELECTED REQUEST</span><h3 id=\"selected-purpose\"></h3><p id=\"selected-id\"></p></div><span class=\"oi-pill\" id=\"selected-status\"></span></div>\n          <div class=\"oi-comparison\"><div class=\"oi-compare-card\"><p class=\"oi-overline\">NEW REQUEST</p><dl><dt>Agent</dt><dd id=\"selected-agent\"></dd><dt>Purpose</dt><dd id=\"detail-purpose\"></dd><dt>Scope</dt><dd id=\"selected-scope\"></dd><dt>Decision</dt><dd id=\"selected-decision\"></dd></dl></div><div class=\"oi-compare-card\"><p class=\"oi-overline\">EXISTING REQUEST / ELASTIC EVIDENCE</p><div id=\"overlap-list\">Run overlap check to see related records and agent explanations.</div></div></div>\n          <div class=\"oi-actions\"><button id=\"check-overlap\" class=\"button button--outline\" type=\"button\">Run / recheck Elastic overlap</button><button id=\"proceed\" class=\"button button--primary\" type=\"button\" hidden>Proceed — no overlap</button><button id=\"buy-both\" class=\"button button--primary\" type=\"button\" hidden>Buy both intentionally</button><button id=\"continue-existing\" class=\"button button--outline\" type=\"button\" hidden>Continue existing</button><button id=\"cancel-new\" class=\"button button--outline\" type=\"button\" hidden>Cancel new request</button><button id=\"continue-checkout\" class=\"button button--primary\" type=\"button\" hidden>Continue to evaluation</button><button id=\"open-contract\" class=\"button button--outline\" type=\"button\" hidden>Open linked contract</button></div>\n          <p class=\"oi-footnote\">Buying both is an explicit buyer decision. Continuing an existing request requires a reserved or completed purchase. Cleared intent is linked to a contract only during the existing evaluation flow.</p>\n        </div>\n      </section>\n      <section class=\"oi-panel\"><div class=\"oi-section-header\"><div><h2>4. AG Studio · live purchase analytics</h2><p>AG Studio's embedded report canvas uses the same real buyer purchase records as the grid. Switch to edit mode to rearrange widgets and build more reports.</p></div><button id=\"studio-mode\" class=\"button button--outline\" type=\"button\">Edit dashboard</button></div><div id=\"studio\" class=\"oi-studio\"></div><p class=\"oi-footnote\">Studio data refreshes with the purchase grid. No fabricated dashboard statistics.</p></section>\n    </main>\n  </div>\n</div>", null, "Agent Purchases · OneIntent · AgentGain");
+Promise.allSettled([
+__loadExternal("https://cdn.jsdelivr.net/npm/ag-grid-community@36.2.0/dist/ag-grid-community.min.js"),
+__loadExternal("https://cdn.jsdelivr.net/npm/ag-studio@3.0.0/dist/ag-studio.min.js")
+]).then(() => {
+/* OneIntent buyer dashboard. Uses the tested server APIs; no client-side AI verdicts or payment actions. */
+(() => {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  let token = '';
+  let records = [];
+  let selectedId = null;
+  let gridApi = null;
+  let studioApi = null;
+  let studioMode = 'view';
+  let pendingAction = false;
+
+  const showMessage = (message, kind = '') => {
+    $('message').textContent = message;
+    $('message').dataset.kind = kind;
+  };
+  const parseError = (body) => typeof body?.detail === 'string'
+    ? body.detail : JSON.stringify(body?.detail ?? body ?? {});
+  async function request(path, body) {
+    if (!token) throw Error('Connect your buyer token first.');
+    const response = await fetch(path, {
+      method: body === undefined ? 'GET' : 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        ...(body === undefined ? {} : {'Content-Type': 'application/json'})
+      },
+      ...(body === undefined ? {} : {body: JSON.stringify(body)}),
+      cache: 'no-store'
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw Error(response.status + ': ' + parseError(payload));
+    return payload;
+  }
+  async function doAction(action) {
+    if (pendingAction) return;
+    pendingAction = true;
+    document.querySelectorAll('.oi-actions button, #create, #refresh, #connect')
+      .forEach(button => {button.disabled = true;});
+    try { await action(); }
+    catch (err) {showMessage(err.message || String(err), 'error');}
+    finally {
+      pendingAction = false;
+      document.querySelectorAll('.oi-actions button, #create, #refresh, #connect')
+        .forEach(button => {button.disabled = false;});
+    }
+  }
+  const statusLabel = status => (status || 'UNKNOWN').replaceAll('_', ' ');
+  const matchList = record => Array.isArray(record?.overlap_review?.overlaps)
+    ? record.overlap_review.overlaps : [];
+  const getSelected = () => records.find(item => item.intent_id === selectedId);
+
+  function initGrid() {
+    if (!window.agGrid?.createGrid) {
+      showMessage('AG Grid did not load. Check the CDN connection and reload.', 'error');
+      return;
+    }
+    gridApi = window.agGrid.createGrid($('purchase-grid'), {
+      rowData: [],
+      columnDefs: [
+        {field: 'requesting_agent_id', headerName: 'Agent', minWidth: 130},
+        {field: 'purpose', headerName: 'Intended need', minWidth: 300, flex: 2, tooltipField: 'purpose'},
+        {field: 'scope_key', headerName: 'Scope / batch', minWidth: 160, flex: 1},
+        {field: 'status', headerName: 'Status', minWidth: 155, valueFormatter: p => statusLabel(p.value)},
+        {field: 'decision', headerName: 'Decision', minWidth: 165, valueFormatter: p => statusLabel(p.value || '—')},
+        {field: 'created_at', headerName: 'Submitted', minWidth: 175, valueFormatter: p => p.value ? new Date(p.value).toLocaleString() : '—'}
+      ],
+      defaultColDef: {sortable: true, filter: true, resizable: true},
+      rowSelection: {mode: 'singleRow', checkboxes: false, enableClickSelection: true},
+      getRowId: params => params.data.intent_id,
+      pagination: true, paginationPageSize: 10,
+      onSelectionChanged(event) {
+        const row = event.api.getSelectedRows()[0];
+        if (row) { selectedId = row.intent_id; renderSelected(); }
+      },
+      overlayNoRowsTemplate: '<span class="ag-overlay-no-rows-center">No purchase records yet. Submit an intent above.</span>'
+    });
+  }
+
+  // Prebuilt, editable AG Studio dashboard. Numeric measures come from real records only.
+  const studioState = () => ({
+    pages: [{
+      id: 'purchase-overview',
+      widgets: {
+        'total': {type: 'value', dataMapping: {value: [{id: 'metrics.total', aggregation: 'max'}]}, format: {caption: {enabled: true, text: 'Purchase requests'}}},
+        'review': {type: 'value', dataMapping: {value: [{id: 'metrics.pending_review', aggregation: 'max'}]}, format: {caption: {enabled: true, text: 'Pending buyer review'}}},
+        'cleared': {type: 'value', dataMapping: {value: [{id: 'metrics.cleared', aggregation: 'max'}]}, format: {caption: {enabled: true, text: 'Cleared / reserved'}}},
+        'statuses': {
+          type: 'bar-chart-grouped',
+          dataMapping: {
+            categoryKey: [{id: 'requests.status'}],
+            valueKey: [{id: 'requests.purchase_count', aggregation: 'sum'}]
+          },
+          format: {title: {enabled: true, text: 'Purchases by status'}}
+        }
+      },
+      widgetLayout: {
+        total: {xTrack: 0, yTrack: 0, xSpan: 8, ySpan: 11},
+        review: {xTrack: 8, yTrack: 0, xSpan: 8, ySpan: 11},
+        cleared: {xTrack: 16, yTrack: 0, xSpan: 8, ySpan: 11},
+        statuses: {xTrack: 0, yTrack: 11, xSpan: 24, ySpan: 26}
+      }
+    }],
+    selectedPageId: 'purchase-overview'
+  });
+
+  function studioSources() {
+    const pending = records.filter(row => row.status === 'PENDING_REVIEW').length;
+    const clear = records.filter(row => ['CLEARED', 'RESERVED', 'COMPLETED'].includes(row.status)).length;
+    return {sources: [
+      {id: 'metrics', data: [{total: records.length, pending_review: pending, cleared: clear}]},
+      {id: 'requests', data: records.map(row => ({
+        intent_id: row.intent_id,
+        requesting_agent_id: row.requesting_agent_id,
+        purpose: row.purpose,
+        scope_key: row.scope_key,
+        status: row.status,
+        decision: row.decision || 'UNDECIDED',
+        purchase_count: 1
+      }))}
+    ]};
+  }
+  function updateStudio() {
+    if (!window.agStudio?.createStudio) {
+      $('studio').textContent = 'AG Studio did not load. Check the CDN connection and reload.';
+      return;
+    }
+    try {
+      if (!studioApi) {
+        studioApi = window.agStudio.createStudio($('studio'), {
+          mode: studioMode,
+          data: studioSources(),
+          initialState: studioState()
+        });
+      } else {
+        studioApi.setProperty('data', studioSources());
+      }
+    } catch (error) {
+      showMessage('AG Studio initialization failed: ' + error.message, 'error');
+      $('studio').textContent = 'AG Studio failed to initialize. See the browser console.';
+      console.error(error);
+    }
+  }
+  function refreshGrid() {
+    gridApi?.setGridOption('rowData', records);
+    updateStudio();
+    if (selectedId && records.some(row => row.intent_id === selectedId)) {
+      gridApi?.forEachNode(node => {
+        if (node.data?.intent_id === selectedId) node.setSelected(true);
+      });
+    }
+    renderSelected();
+  }
+  async function refresh() {
+    const data = await request('/intents');
+    if (!Array.isArray(data.intents)) throw Error('Unexpected response from GET /intents.');
+    records = data.intents;
+    if (selectedId && !records.some(item => item.intent_id === selectedId)) selectedId = null;
+    refreshGrid();
+    showMessage(`Loaded ${records.length} buyer purchase request${records.length === 1 ? '' : 's'} from the backend.`, 'success');
+  }
+  const text = (id, value) => {$(id).textContent = value == null ? '—' : String(value);};
+  const visible = (id, enabled) => {$(id).hidden = !enabled;};
+
+  function renderSelected() {
+    const selected = getSelected();
+    visible('selection-empty', !selected);
+    visible('selection-content', Boolean(selected));
+    if (!selected) return;
+    text('selected-purpose', selected.purpose);
+    text('selected-id', selected.intent_id);
+    text('selected-status', statusLabel(selected.status));
+    text('selected-agent', selected.requesting_agent_id);
+    text('detail-purpose', selected.purpose);
+    text('selected-scope', selected.scope_key);
+    text('selected-decision', selected.decision || 'Awaiting buyer decision');
+    const overlaps = matchList(selected);
+    const reviewDone = Array.isArray(selected.overlap_review?.reviewed_ids);
+    const list = $('overlap-list');
+    list.replaceChildren();
+    if (!reviewDone) {
+      list.textContent = 'Run an Elastic overlap check before approving this request.';
+    } else if (!overlaps.length) {
+      list.textContent = 'No candidate overlap reported in the last recorded review.';
+    } else {
+      for (const overlap of overlaps) {
+        const existing = records.find(row => row.intent_id === overlap.intent_id);
+        const card = document.createElement('div');
+        card.className = 'oi-match';
+        const title = document.createElement('strong');
+        title.textContent = existing ? existing.purpose : overlap.intent_id;
+        const detail = document.createElement('p');
+        detail.textContent = `Evidence: ${overlap.reason || 'Potential overlap'} · Status: ${existing?.status || 'unknown'}`;
+        card.append(title, detail);
+        list.append(card);
+      }
+      const candidates = overlaps.map(item => records.find(row => row.intent_id === item.intent_id))
+        .filter(row => row && ['RESERVED','COMPLETED'].includes(row.status));
+      if (candidates.length) {
+        const label = document.createElement('label');
+        label.textContent = 'Existing reserved / completed purchase ';
+        const select = document.createElement('select');
+        select.id = 'existing-match';
+        for (const candidate of candidates) {
+          const option = document.createElement('option');
+          option.value = candidate.intent_id;
+          option.textContent = `${candidate.requesting_agent_id} — ${candidate.purpose}`;
+          select.append(option);
+        }
+        label.append(select);
+        list.append(label);
+      }
+    }
+    const pending = selected.status === 'PENDING_REVIEW';
+    const canDecide = pending && reviewDone;
+    visible('check-overlap', pending || selected.status === 'CLEARED');
+    visible('proceed', canDecide && overlaps.length === 0);
+    visible('buy-both', canDecide && overlaps.length > 0);
+    visible('cancel-new', canDecide && overlaps.length > 0);
+    visible('continue-existing', canDecide && overlaps.length > 0 && Boolean($('existing-match')));
+    visible('continue-checkout', selected.status === 'CLEARED' && ['PROCEED','BUY_BOTH'].includes(selected.decision));
+    visible('open-contract', Boolean(selected.contract_id));
+  }
+  async function resolve(action) {
+    const intent = getSelected();
+    if (!intent) throw Error('Select an intent.');
+    const body = {action};
+    if (action === 'CONTINUE_EXISTING') {
+      const id = $('existing-match')?.value;
+      if (!id) throw Error('Select an existing reserved or completed purchase.');
+      body.existing_intent_id = id;
+    }
+    if (action === 'BUY_BOTH' && !window.confirm('Approve both overlapping purchases? This explicitly permits an additional purchase.')) return;
+    if (action === 'CANCEL_NEW' && !window.confirm('Cancel this new request before payment?')) return;
+    const result = await request('/intents/' + encodeURIComponent(intent.intent_id) + '/resolve', body);
+    await refresh();
+    showMessage(`Buyer decision confirmed by backend: ${result.action} — ${result.status}`, 'success');
+  }
+  function prepareNavigation(intent, contractId) {
+    const key = 'agentgain.connected.ids';
+    let ids = {};
+    try {ids = JSON.parse(sessionStorage.getItem(key) || '{}') || {};} catch { /* disregard invalid saved navigation state */ }
+    const next = contractId ? { ...ids, contractId, runId: null } : {
+      ...ids,
+      intentId: intent.intent_id,
+      skillId: intent.scope_metadata_json?.skill_id || ids.skillId || null,
+      datasetId: null,
+      contractId: null,
+      runId: null
+    };
+    sessionStorage.setItem(key, JSON.stringify(next));
+    window.location.assign(contractId ? '/buyer/evaluations/review' : '/buyer/evaluations/new');
+  }
+  function handle(id, callback) {$(id).addEventListener('click', () => doAction(callback));}
+
+  initGrid();
+  handle('connect', async () => {
+    token = $('token').value.trim();
+    if (!token) throw Error('Paste DEMO_BUYER_TOKEN.');
+    try {
+      const user = await request('/api/me');
+      if (user.role !== 'buyer') throw Error('This is not a buyer token.');
+      const skills = await request('/api/skills');
+      const options = document.querySelector('[name="skill"]');
+      options.replaceChildren(new Option('Choose later', ''));
+      (skills.skills || []).forEach(skill => options.add(new Option(skill.title + ' · ' + skill.version, skill.skill_id)));
+      await refresh();
+    } catch(error) {token = '';throw error;}
+  });
+  handle('refresh', refresh);
+  $('grid-search').addEventListener('input', e => gridApi?.setGridOption('quickFilterText', e.target.value));
+  $('new-intent').addEventListener('submit', event => {
+    event.preventDefault();
+    doAction(async () => {
+      const form = new FormData(event.currentTarget);
+      const intent = await request('/intents', {
+        request_id: 'req-' + crypto.randomUUID(),
+        requesting_agent_id: String(form.get('agent')).trim(),
+        purpose: String(form.get('purpose')).trim(),
+        scope_key: String(form.get('scope')).trim(),
+        scope_metadata_json: {
+          recipient: String(form.get('recipient')).trim(),
+          task_type: 'agent_skill_purchase',
+          skill_id: String(form.get('skill')).trim()
+        }
+      });
+      selectedId = intent.intent_id;
+      await refresh();
+      showMessage('Intent recorded. Select Run Elastic overlap check, then decide whether to proceed.', 'success');
+    });
+  });
+  handle('check-overlap', async () => {
+    const selected = getSelected();
+    if (!selected) throw Error('Select an intent first.');
+    const result = await request('/intents/' + encodeURIComponent(selected.intent_id) + '/check', {});
+    await refresh();
+    showMessage(result.requires_buyer_decision
+      ? `Elastic review returned ${result.overlaps.length} possible overlap(s). Choose an explicit decision.`
+      : 'No overlap found. Select Proceed to record the buyer decision.', 'success');
+  });
+  for (const [button, action] of [['proceed', 'PROCEED'], ['buy-both', 'BUY_BOTH'],
+    ['continue-existing', 'CONTINUE_EXISTING'], ['cancel-new', 'CANCEL_NEW']]) {
+    handle(button, () => resolve(action));
+  }
+  handle('continue-checkout', async () => {
+    const selected = getSelected();
+    if (!selected || selected.status !== 'CLEARED') throw Error('Intent must be cleared by backend before evaluation.');
+    prepareNavigation(selected, null);
+  });
+  handle('open-contract', async () => {
+    const selected = getSelected();
+    if (!selected?.contract_id) throw Error('This intent has no linked contract.');
+    prepareNavigation(selected, selected.contract_id);
+  });
+  handle('studio-mode', async () => {
+    if (!studioApi) throw Error('AG Studio is not available. Connect and load data first.');
+    studioMode = studioMode === 'view' ? 'edit' : 'view';
+    studioApi.setProperty('mode', studioMode);
+    $('studio-mode').textContent = studioMode === 'edit' ? 'Finish editing' : 'Edit dashboard';
+  });
+})();
+
+});
+} else if (__view === "demo") {
+__renderSpecial("<h1>AgentGain evaluation demo</h1><p class=\"banner\"><strong>Demo — no payment processed.</strong> This page runs real model comparisons. It does not authorize funds, issue a receipt, or unlock the skill package.</p>\n<section><p>Use the buyer token and the FULL_SKILL contract you already approved in the <a href=\"/?view=integration\" target=\"_blank\" rel=\"noopener\">integration page</a>. The contract must have no PayPal order.</p>\n<label>Buyer token<input id=\"token\" type=\"password\" autocomplete=\"off\"></label><label>Approved Contract ID<input id=\"contract\" placeholder=\"contract_...\"></label>\n<button id=\"start\">Run demo evaluation</button><label>Demo Run ID (save this to resume)<input id=\"run\" placeholder=\"demo_...\"></label><button id=\"refresh\">Refresh results</button><button id=\"watch\">Watch results</button><button id=\"stop\">Stop watching</button><p id=\"message\" role=\"status\">Ready</p></section>\n<section><h2>Evaluation status</h2><pre id=\"status\"></pre><h2>Summary</h2><pre id=\"summary\">Waiting for evaluation</pre><p>Skilled output text remains private during this unpaid demo. Scores, comparisons, tokens and timings come from actual executions.</p><div id=\"grid\"></div></section>","body{font:17px system-ui;max-width:1000px;margin:40px auto;padding:0 20px;background:#f3f6fb;color:#172239}section{background:white;padding:24px;border-radius:14px;margin:20px 0}input{display:block;padding:12px;width:95%;margin:12px 0}button{padding:12px;cursor:pointer;margin:8px}pre{white-space:pre-wrap;overflow-wrap:anywhere}#grid{overflow:auto}table{border-collapse:collapse}td,th{padding:10px;border:1px solid #ccd3df}.banner{background:#fff0c2;padding:16px}", "AgentGain local demo");
+const $=id=>document.getElementById(id);
+let watching=false;
+async function request(path,post=false){
+ if(!$('token').value.trim())throw Error('Paste your buyer token first.');
+ const r=await fetch(path,{method:post?'POST':'GET',headers:{Authorization:'Bearer '+$('token').value.trim()}});
+ const data=await r.json();if(!r.ok)throw Error(typeof data.detail==='string'?data.detail:JSON.stringify(data.detail));return data;
+}
+async function refresh(){
+ const id=$('run').value.trim();if(!id)throw Error('Enter a demo run ID or start an evaluation.');
+ const data=await request('/demo/runs/'+encodeURIComponent(id));
+ $('status').textContent=JSON.stringify({mode:data.mode,status:data.status,completed_records:data.completed_records,payment_processed:false},null,2);
+ $('summary').textContent=JSON.stringify(data.summary||{message:'Evaluation pending. Keep the demo worker running.'},null,2);
+ const cols=['record_index','baseline_passed','skilled_passed','comparison_status','baseline_tokens','skilled_tokens','baseline_ms','skilled_ms'];
+ const table=document.createElement('table');const head=table.insertRow();
+ for(const col of cols){const th=document.createElement('th');th.textContent=col;head.append(th);}
+ for(const row of data.rows){const tr=table.insertRow();for(const col of cols)tr.insertCell().textContent=String(row[col]);}
+ $('grid').replaceChildren(table);return data;
+}
+function bind(id,fn){$(id).onclick=async()=>{$(id).disabled=true;try{await fn();$('message').textContent='Request completed.';}catch(e){$('message').textContent=e.message;watching=false;}finally{$(id).disabled=false;}};}
+bind('start',async()=>{const c=$('contract').value.trim();if(!c)throw Error('Paste your approved Contract ID.');const d=await request('/demo/contracts/'+encodeURIComponent(c)+'/run',true);$('run').value=d.run_id;await refresh();});
+bind('refresh',refresh);
+bind('watch',async()=>{watching=true;const end=Date.now()+7200000;while(watching&&Date.now()<end){const d=await refresh();if(['COMPLETED','TECHNICAL_ERROR'].includes(d.status))break;await new Promise(r=>setTimeout(r,5000));}watching=false;});
+bind('stop',async()=>{watching=false;});
+
+} else if (__view === "integration") {
+__renderSpecial("<h1>AgentGain · sandbox integration</h1><p>This console connects to the uploaded backend. Use it to establish the flow, then reuse api.js in your existing UI.</p><p id=\"message\" role=\"status\">Ready</p>\n<section><h2>1. Demo access</h2><label>Token for the current action <input id=\"token\" type=\"password\" autocomplete=\"off\"></label><p>Use the seller token to register and view seller analytics. Use the buyer token for all purchase steps. Tokens stay in memory.</p><button id=\"health\">Check API</button></section>\n<section><h2>2. Register or load a skill</h2><textarea id=\"skillBody\" aria-label=\"Skill JSON\"></textarea><button id=\"register\">Register (seller)</button><label>Skill ID <input id=\"skillId\"></label><button id=\"checkout\">Load checkout</button><pre id=\"skillView\"></pre></section>\n<section><h2>3. Attempt the original task (optional)</h2><textarea id=\"attemptBody\" aria-label=\"Original task JSON\"></textarea><button id=\"attempt\">Attempt task (buyer)</button><pre id=\"attemptView\"></pre></section>\n<section><h2>4. Prepare separate evaluation data</h2><textarea id=\"datasetBody\" aria-label=\"Dataset JSON\"></textarea><button id=\"dataset\">Prepare dataset (buyer)</button><label>Dataset ID <input id=\"datasetId\"></label></section>\n<section><h2>5. Review and approve the contract</h2><label>Model <input id=\"model\" value=\"qwen2.5:7b-instruct\"></label><button id=\"create\">Create FULL_SKILL contract</button><label>Contract ID <input id=\"contractId\"></label><button id=\"load\">Load existing contract</button><pre id=\"terms\"></pre><label><input id=\"consent\" type=\"checkbox\" style=\"width:auto\"> I have reviewed and approve the displayed terms.</label><button id=\"approve\">Approve these terms</button></section>\n<section><h2>6. Authorize with PayPal</h2><button id=\"paypalInit\">Prepare PayPal button</button><paypal-button id=\"paypalCheckoutButton\" hidden></paypal-button><p>Authorization reserves funds. Evaluation and settlement continue on the server.</p><button id=\"returnAuthorize\">Confirm authorization after PayPal return</button><p>Use that recovery button only after completing PayPal approval. It asks the backend to confirm authorization; it cannot mark a payment completed.</p></section>\n<section><h2>7. Status and evidence</h2><button id=\"refresh\">Refresh</button><button id=\"watch\">Watch status</button><button id=\"stop\">Stop watching</button><pre id=\"status\"></pre><pre id=\"summary\"></pre><div id=\"grid\"></div></section>\n<section><h2>8. Delivery, original task, seller records</h2><button id=\"receipt\">Get receipt and tested package</button><button id=\"retry\">Retry recorded original task</button><button id=\"funnel\">Seller funnel</button><button id=\"outcomes\">Seller outcomes</button><pre id=\"delivery\"></pre></section>","body{font:16px system-ui;max-width:1050px;margin:30px auto;padding:0 20px;color:#182036;background:#f4f7fb}section{background:white;padding:20px;margin:16px 0;border-radius:12px}textarea{width:100%;height:190px;box-sizing:border-box}input{padding:9px;max-width:90%;width:440px}button{padding:10px;margin:6px;cursor:pointer}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#eef2f8;padding:14px}table{display:block;overflow:auto;border-collapse:collapse}td,th{padding:8px;border:1px solid #ddd;text-align:left}td pre{max-width:230px;font-size:12px}#message{position:sticky;top:0;background:#e6eefb;padding:12px}label{display:block;margin:8px 0}", "AgentGain integration console");
+// Framework independent: import this module from plain JavaScript or React.
+class AgentGainAPI {
+  constructor({baseURL = "", getToken = () => ""} = {}) {
+    this.baseURL = baseURL.replace(/\/$/, "");
+    this.getToken = getToken;
+  }
+  async request(path, {body, auth = true, signal} = {}) {
+    const token = auth ? this.getToken() : "";
+    if (auth && !token) throw new Error("Enter the appropriate buyer or seller demo token.");
+    const response = await fetch(this.baseURL + path, {
+      method: body === undefined ? "GET" : "POST",
+      headers: {...(body === undefined ? {} : {"Content-Type":"application/json"}),
+        ...(token ? {Authorization: "Bearer " + token} : {})},
+      ...(body === undefined ? {} : {body: JSON.stringify(body)}), signal
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const detail = typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail || data);
+      const error = new Error(response.status + ": " + detail);
+      error.status = response.status;
+      throw error;
+    }
+    return data;
+  }
+  health() { return this.request("/health", {auth:false}); }
+  config() { return this.request("/api/frontend-config", {auth:false}); }
+  registerSkill(body) { return this.request("/api/skills/register", {body}); }
+  checkout(id) { return this.request("/api/checkout/" + encodeURIComponent(id), {auth:false}); }
+  attemptTask(body) { return this.request("/api/buyer/attempt-task", {body}); }
+  prepareDataset(body) { return this.request("/api/datasets/prepare", {body}); }
+  createContract(body) { return this.request("/contracts/", {body}); }
+  contract(id) { return this.request("/contracts/" + encodeURIComponent(id)); }
+  approveContract(c) { return this.request("/contracts/" + encodeURIComponent(c.contract_id) + "/approve",
+    {body:{contract_version:c.contract_version, terms_hash:c.terms_hash}}); }
+  order(id) { return this.request("/payments/" + encodeURIComponent(id) + "/order", {body:{}}); }
+  authorize(id) { return this.request("/payments/" + encodeURIComponent(id) + "/authorize", {body:{}}); }
+  status(id) { return this.request("/payments/" + encodeURIComponent(id) + "/status"); }
+  evidence(id) { return this.request("/analytics/contracts/" + encodeURIComponent(id) + "/evidence"); }
+  receipt(id) { return this.request("/payments/" + encodeURIComponent(id) + "/receipt"); }
+  retryTask(body) { return this.request("/api/buyer/retry-original-task", {body}); }
+  sellerFunnel(id) { return this.request("/analytics/seller/" + encodeURIComponent(id) + "/funnel"); }
+  sellerOutcomes(id) { return this.request("/analytics/seller/" + encodeURIComponent(id) + "/outcomes"); }
+  async watch(id, onUpdate, {signal, interval = 5000, maxMs = 7200000} = {}) {
+    const start = Date.now();
+    while (!signal?.aborted && Date.now() - start < maxMs) {
+      const state = await this.status(id);
+      await onUpdate(state);
+      if (["CAPTURE_COMPLETED", "VOIDED", "PAYMENT_ERROR"].includes(state.payment_state)) return state;
+      await new Promise(resolve => setTimeout(resolve, interval));
+    }
+    return null; // Local timeout or cancellation never implies provider cancellation.
+  }
+}
+
+async function mountPayPal({api, contractId, button, onUpdate, onError}) {
+  if (typeof window.paypal?.createInstance !== "function") {
+  throw new Error("PayPal SDK v6 did not load. Check the browser Console for a blocked or failed PayPal script.");
+}
+  const config = await api.config();
+  if (!config.paypal_client_id) throw new Error("Set PAYPAL_CLIENT_ID in the backend .env.");
+  const sdk = await window.paypal.createInstance({
+    clientId: config.paypal_client_id, components:["paypal-payments"], pageType:"checkout"
+  });
+  const methods = await sdk.findEligibleMethods({currencyCode:"USD"});
+  if (!methods.isEligible("paypal")) throw new Error("PayPal is not eligible for this browser/buyer.");
+  const session = sdk.createPayPalOneTimePaymentSession({
+    async onApprove(data) {
+      try {
+        const stored = await api.status(contractId);
+        if (stored.paypal_order_id !== data.orderId) throw new Error("PayPal order does not match this contract.");
+        // Approval starts server authorization, never browser capture.
+        await api.authorize(contractId);
+        await onUpdate();
+      } catch (error) { onError(error); }
+    },
+    onCancel() { onError(new Error("PayPal approval cancelled. Refresh server status before retrying.")); },
+    onError
+  });
+  const click = async () => {
+    if (button.dataset.busy) return;
+    button.dataset.busy = "1";
+    try {
+      await session.start({presentationMode:"auto"},
+        api.order(contractId).then(order => ({orderId:order.paypal_order_id})));
+    } catch (error) { onError(error); }
+    finally { delete button.dataset.busy; }
+  };
+  button.addEventListener("click", click);
+  button.hidden = false;
+  return () => { button.hidden = true; button.removeEventListener("click", click); };
+}
+
+__loadExternal("https://www.sandbox.paypal.com/web-sdk/v6/core").catch(() => null).then(async () => {
+
+
+const $ = id => document.getElementById(id);
+const api = new AgentGainAPI({getToken:()=>$('token').value.trim()});
+let currentContract, failureId, watchController, removePayPal;
+const query = new URLSearchParams(location.search);
+$('skillId').value = query.get('skill_id') || '';
+$('contractId').value = query.get('contract_id') || '';
+function message(value) {$('message').textContent = value;}
+function show(id, value) {$(id).textContent = JSON.stringify(value,null,2);}
+function bind(id, action) {$(id).onclick = async () => {$(id).disabled=true;try {await action();message('Request completed.');} catch(e){message(e.message);} finally {$(id).disabled=false;}};}
+function json(id) {return JSON.parse($(id).value);}
+function cid() {const id=$('contractId').value.trim(); if(!id) throw new Error('Load or create a contract first.'); return id;}
+function displayContract(c) {currentContract=c;$('contractId').value=c.contract_id;show('terms',c);$('consent').checked=false;removePayPal?.();}
+function evidenceTable(data) {
+  $('grid').replaceChildren();
+  const table=document.createElement('table');
+  const cols=['record_index','baseline_passed','skilled_passed','comparison_status','baseline_error','baseline_output','skilled_output','baseline_tokens','skilled_tokens','baseline_ms','skilled_ms'];
+  const head=table.insertRow();for(const col of cols){const th=document.createElement('th');th.textContent=col;head.append(th);}
+  for(const row of data.ag_grid_rows){const tr=table.insertRow();for(const col of cols){const td=tr.insertCell();td.textContent=row[col]===null?'Unavailable / locked':typeof row[col]==='object'?JSON.stringify(row[col]):String(row[col]);}}
+  $('grid').append(table);
+}
+async function refresh() {const id=cid();show('status',await api.status(id));const e=await api.evidence(id);const {ag_grid_rows,...summary}=e;show('summary',summary);evidenceTable(e);}
+bind('health',async()=>show('status',await api.health()));
+bind('register',async()=>{const r=await api.registerSkill(json('skillBody'));$('skillId').value=r.skill_id;show('skillView',r);});
+bind('checkout',async()=>show('skillView',await api.checkout($('skillId').value.trim())));
+bind('attempt',async()=>{const r=await api.attemptTask(json('attemptBody'));failureId=r.failure_id;show('attemptView',r);if(r.recommended_skill)$('skillId').value=r.recommended_skill.skill_id;});
+bind('dataset',async()=>{const body=json('datasetBody');if(failureId)body.origin_failure_id=failureId;const r=await api.prepareDataset(body);$('datasetId').value=r.dataset_id;show('status',r);});
+bind('create',async()=>displayContract(await api.createContract({skill_id:$('skillId').value.trim(),dataset_id:$('datasetId').value.trim(),model_name:$('model').value.trim(),purchase_mode:'FULL_SKILL'})));
+bind('load',async()=>displayContract(await api.contract(cid())));
+bind('approve',async()=>{if(!currentContract||cid()!==currentContract.contract_id||!$('consent').checked)throw new Error('Load the contract, review it and check approval first.');show('status',await api.approveContract(currentContract));});
+bind('paypalInit',async()=>{const c=await api.contract(cid());if(!['FROZEN','COMPLETED'].includes(c.status))throw new Error('Approve the contract first.');removePayPal?.();removePayPal=await mountPayPal({api,contractId:cid(),button:$('paypalCheckoutButton'),onUpdate:refresh,onError:e=>message(e.message)});});
+bind('returnAuthorize',async()=>{await api.authorize(cid());await refresh();});
+bind('refresh',refresh);
+bind('watch',async()=>{watchController?.abort();watchController=new AbortController();const id=cid();await api.watch(id,async s=>{show('status',s);const e=await api.evidence(id);const {ag_grid_rows,...summary}=e;show('summary',summary);evidenceTable(e);},{signal:watchController.signal});});
+bind('stop',async()=>watchController?.abort());
+bind('receipt',async()=>show('delivery',await api.receipt(cid())));
+bind('retry',async()=>{if(!failureId)throw new Error('Attempt the original task in this session first.');show('delivery',await api.retryTask({contract_id:cid(),failure_id:failureId}));});
+bind('funnel',async()=>show('delivery',await api.sellerFunnel($('skillId').value.trim())));
+bind('outcomes',async()=>show('delivery',await api.sellerOutcomes($('skillId').value.trim())));
+for(const [id,name] of [['skillBody','skill'],['attemptBody','attempt'],['datasetBody','dataset']]) {
+ try {const r=await fetch('../integration-examples/'+name+'.json');if(!r.ok)throw new Error('Example unavailable');$(id).value=JSON.stringify(await r.json(),null,2);}catch(e){message(e.message);}
+}
+if(query.has('paypal_return'))message('PayPal returned. Enter buyer token, load the contract, then confirm authorization.');
+if(query.has('paypal_cancel'))message('PayPal approval cancelled. Enter buyer token and refresh server status.');
+
+});
+} else {
+// Sandbox UI only. All authorization, settlement and delivery checks stay on the server.
+let loadingSDK;
+function loadSandboxSDK() {
+ if(typeof window.paypal?.createInstance==='function')return Promise.resolve(window.paypal);
+ if(loadingSDK)return loadingSDK;
+ loadingSDK=new Promise((resolve,reject)=>{
+  if(document.querySelector('script[src*="paypal.com/sdk/js"]'))return reject(Error('Remove the older PayPal SDK before using checkout.'));
+  const script=document.createElement('script');script.src='https://www.sandbox.paypal.com/web-sdk/v6/core';script.async=true;
+  const timer=setTimeout(()=>finish(Error('PayPal SDK timed out. Check your connection and retry.')),30000);
+  function finish(error){clearTimeout(timer);script.onload=null;script.onerror=null;if(error){script.remove();reject(error)}else resolve(window.paypal)}
+  script.onload=()=>finish(typeof window.paypal?.createInstance==='function'?null:Error('PayPal SDK did not initialize.'));
+  script.onerror=()=>finish(Error('PayPal SDK was blocked or failed to load.'));
+  document.head.append(script);
+ }).catch(error=>{loadingSDK=null;throw error});return loadingSDK;
+}
+function createPaymentPanel({React:R,useApp,card,button,json}) {
+ const h=R.createElement;
+ return function PaymentPanel({contract}) {
+  const app=useApp(),id=contract.contract_id,path='/payments/'+encodeURIComponent(id);
+  const [status,setStatus]=R.useState(null),[proof,setProof]=R.useState(null),[receipt,setReceipt]=R.useState(null),[error,setError]=R.useState(''),[busy,setBusy]=R.useState(false),[ready,setReady]=R.useState(false),[watch,setWatch]=R.useState(true),[revision,bump]=R.useReducer(n=>n+1,0);
+  const target=R.useRef(null),session=R.useRef(null),alive=R.useRef(true),locked=R.useRef(false);
+  const apiRef=R.useRef(app.api);apiRef.current=app.api;
+  R.useEffect(()=>{alive.current=true;return()=>{alive.current=false;session.current=null}},[]);
+  R.useEffect(()=>{session.current=null;setReady(false);setStatus(null);setProof(null);setReceipt(null);setError('')},[app.tokens.buyer,id]);
+  async function action(fn){if(locked.current)return;locked.current=true;setBusy(true);setError('');try{await fn()}catch(e){if(alive.current)setError(e.message||String(e))}finally{locked.current=false;if(alive.current)setBusy(false)}}
+  R.useEffect(()=>{
+   if(!app.tokens.buyer)return;
+   let live=true,timer;const controller=new AbortController();
+   async function tick(){try{
+    const state=await apiRef.current(path+'/status',{signal:controller.signal});if(!live)return;setStatus(state);setError('');
+    try{const ev=await apiRef.current('/analytics/contracts/'+encodeURIComponent(id)+'/evidence',{signal:controller.signal});if(live)setProof(ev)}catch(e){if(live&&e.name!=='AbortError')setError(e.message)}
+    if(live&&watch&&!['CAPTURE_COMPLETED','VOIDED','PAYMENT_ERROR'].includes(state.payment_state))timer=setTimeout(tick,4000);
+   }catch(e){if(live&&e.name!=='AbortError')setError(e.message)}}
+   tick();return()=>{live=false;controller.abort();clearTimeout(timer)};
+  },[id,app.tokens.buyer,watch,revision]);
+  const refresh=()=>bump();
+  async function prepare(){await action(async()=>{
+   if(contract.terms?.intent_id){
+    await apiRef.current('/intents/'+encodeURIComponent(contract.terms.intent_id)+'/reserve',{body:{contract_id:id}});
+   }
+   const cfg=await apiRef.current('/api/frontend-config',{role:null});if(cfg.environment!=='SANDBOX'||!cfg.paypal_client_id)throw Error('Configure the sandbox app credentials in .env first.');
+   const globalSDK=await loadSandboxSDK();const sdk=await globalSDK.createInstance({clientId:cfg.paypal_client_id,components:['paypal-payments'],pageType:'checkout'});
+   const methods=await sdk.findEligibleMethods({currencyCode:'USD'});if(!methods.isEligible('paypal'))throw Error('PayPal is not eligible in this browser.');
+   const created=sdk.createPayPalOneTimePaymentSession({
+    async onApprove(data){if(!alive.current)return;try{const stored=await apiRef.current(path+'/status');if(stored.paypal_order_id!==data.orderId)throw Error('Order does not match this contract.');await apiRef.current(path+'/authorize',{body:{}});if(alive.current){setWatch(true);refresh()}}catch(e){if(alive.current)setError(e.message||String(e))}},
+    onCancel(){if(alive.current){setError('Checkout closed. No success assumed; refresh the server status before retrying.');refresh()}},
+    onError(e){if(alive.current){setError(e.message||'PayPal checkout error. Refresh status before retrying.');refresh()}}
+   });
+   if(!alive.current)return;session.current=created;setReady(true);
+  })}
+  R.useEffect(()=>{
+   const el=target.current;if(!el||!ready)return;
+   const click=()=>{if(locked.current||!session.current)return;setError('');locked.current=true;setBusy(true);
+    // Start from the user click. Only the server creates an AUTHORIZE order.
+    const order=apiRef.current(path+'/order',{body:{}}).then(d=>({orderId:d.paypal_order_id}));
+    Promise.resolve().then(()=>session.current.start({presentationMode:'auto'},order)).catch(e=>{if(alive.current)setError(e.message||String(e))}).finally(()=>{locked.current=false;if(alive.current){setBusy(false);refresh()}});
+   };el.addEventListener('click',click);return()=>el.removeEventListener('click',click);
+  },[ready,id]);
+  const state=status?.payment_state;
+  const canPay=contract.status==='FROZEN'&&['UNINITIALIZED','ORDER_CREATED'].includes(state);
+  const returned=new URLSearchParams(location.search).has('paypal_return');
+  const messages={UNINITIALIZED:'No order yet. Prepare the button to authorize the frozen price.',ORDER_CREATED:'Order created. Finish PayPal approval, then confirm authorization.',AUTHORIZED:'Authorized — evaluation pending or running. Keep worker.py and Ollama running.',CAPTURE_PENDING:'Capture pending. The server is reconciling payment; do not start another purchase.',CAPTURE_COMPLETED:'Sandbox capture confirmed. Request your receipt and tested package below.',VOID_PENDING:'Cancellation pending. Wait for backend confirmation.',VOIDED:'Authorization cancelled. No capture for this contract. Create a new contract only for a new evaluation.',PAYMENT_ERROR:'Payment needs attention. Check server logs and provider status before another purchase.'};
+  const rows=proof?.ag_grid_rows||[];
+  const columns=['record_index','baseline_passed','skilled_passed','comparison_status','baseline_error','baseline_output','skilled_output','baseline_tokens','skilled_tokens','baseline_ms','skilled_ms'];
+  const renderCell=(r,c)=>r[c]===null||r[c]===undefined?(c==='skilled_output'?'Locked / unavailable':'—'):typeof r[c]==='object'?JSON.stringify(r[c]):String(r[c]);
+  function download(){if(!receipt)return;const blob=new Blob([JSON.stringify(receipt,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='AgentGain-'+id+'-receipt.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
+  return card('PayPal Sandbox checkout',h('p',null,'Test money only. Approve the authorization; the backend evaluates and decides capture or cancellation.'),
+   !app.config.payments_enabled&&h('p',{role:'alert'},'Set PAYMENT_CONTROLLER_ENABLED=1 and restart checkout_server before paying.'),
+   returned&&h('p',null,'Returned from PayPal. Reconnect your buyer token if needed, then confirm authorization below.'),
+   h('p',{role:'status'},messages[state]||'Connect buyer access to load payment status.'),error&&h('p',{role:'alert',className:'ag-error'},error),
+   status&&json(status),
+   canPay&&app.config.payments_enabled&&h(R.Fragment,null,button(busy?'Preparing…':'Prepare PayPal button',prepare,{disabled:busy||ready}),h('paypal-button',{ref:target,hidden:!ready||busy,'aria-label':'Authorize sandbox purchase'})),
+   state==='ORDER_CREATED'&&button('Confirm authorization after PayPal approval',()=>action(async()=>{await apiRef.current(path+'/authorize',{body:{}});setWatch(true);refresh()}),{disabled:busy}),
+   button('Refresh payment and evidence',refresh,{variant:'outline'}),button(watch?'Stop watching':'Watch status',()=>setWatch(v=>!v),{variant:'outline'}),
+   h('p',null,'Stopping updates does not stop backend evaluation or payment processing.'),
+   proof&&h(R.Fragment,null,h('h3',null,'Recorded evaluation evidence'),json(Object.fromEntries(Object.entries(proof).filter(([k])=>k!=='ag_grid_rows'))),h('div',{className:'seller-table-scroll'},h('table',{className:'seller-table'},h('thead',null,h('tr',null,columns.map(c=>h('th',{key:c},c.replaceAll('_',' '))))),h('tbody',null,rows.map(r=>h('tr',{key:r.record_index},columns.map(c=>h('td',{key:c},renderCell(r,c))))))))),
+   state==='CAPTURE_COMPLETED'&&status?.eval_verdict==='PASS'&&button('Get receipt and tested package',()=>action(async()=>{const r=await apiRef.current(path+'/receipt');if(alive.current)setReceipt(r)}),{disabled:busy}),
+   receipt&&h(R.Fragment,null,h('h3',null,'Verified delivery'),json(receipt),button('Download receipt and package JSON',download)));
+ };
+}
+
+
+// Editable integration layer for the supplied compiled React frontend.
+// Access tokens live only in React memory. Model results come only from the API.
+function createConnectedScreens({React:R, Link, useNavigate, useLocation, sampleDataset, sampleSkill}) {
+ const h=R.createElement, Context=R.createContext(null);
+ const readIds=()=>{let ids={};try{ids=JSON.parse(sessionStorage.getItem('agentgain.connected.ids'))||{}}catch{}const returned=new URLSearchParams(location.search).get('contract_id');return returned?{...ids,contractId:returned,runId:null}:ids};
+ function Provider({children}) {
+  const [tokens,setTokens]=R.useState({buyer:'',seller:''}),[ids,setIdsState]=R.useState(readIds),[notice,setNotice]=R.useState(''),[connection,setConnection]=R.useState(false),[health,setHealth]=R.useState('Checking API…'),[config,setConfig]=R.useState({models:[],min_eval_records:3});
+  const setIds=patch=>setIdsState(previous=>{const next={...previous,...patch};sessionStorage.setItem('agentgain.connected.ids',JSON.stringify(next));return next});
+  async function api(path,{role='buyer',body,token,signal}={}) {
+   const credential=token===undefined?tokens[role]:token;
+   if(role&&!credential){setConnection(true);throw Error('Connect your '+role+' demo token first.');}
+   let response;try{response=await fetch(path,{method:body===undefined?'GET':'POST',headers:{...(body===undefined?{}:{'Content-Type':'application/json'}),...(credential?{Authorization:'Bearer '+credential}: {})},...(body===undefined?{}:{body:JSON.stringify(body)}),signal});}catch(e){if(e.name==='AbortError')throw e;throw Error('Cannot reach the backend. Keep the application server running on port 8000.');}
+   const data=await response.json().catch(()=>({}));
+   if(!response.ok){if(response.status===401||response.status===503)setConnection(true);throw Error(response.status+': '+(typeof data.detail==='string'?data.detail:JSON.stringify(data.detail||data)));}return data;
+  }
+  R.useEffect(()=>{const controller=new AbortController();Promise.all([api('/health',{role:null,signal:controller.signal}),api('/api/ui-config',{role:null,signal:controller.signal})]).then(([health,settings])=>{setHealth(health.ok?'API connected':'API unavailable');setConfig(settings)}).catch(e=>{if(e.name!=='AbortError')setHealth(e.message)});return()=>controller.abort()},[]);
+  return h(Context.Provider,{value:{api,tokens,setTokens,ids,setIds,notice,setNotice,config,openConnection:()=>setConnection(true)}},children,
+   h('div',{className:'ag-live-bar'},h('span',null,(config.mode==='PAYPAL_SANDBOX'?'PayPal Sandbox · test money · ':'Local demo · no payment · ')+health),h('button',{onClick:()=>setConnection(true)},tokens.buyer||tokens.seller?'Demo access ✓':'Connect demo access')),
+   connection&&h(Connection,{onClose:()=>setConnection(false)}));
+ }
+ const useApp=()=>R.useContext(Context);
+ function useAction(){const app=useApp(),[busy,setBusy]=R.useState(false);return [busy,async action=>{if(busy)return;setBusy(true);app.setNotice('');try{await action()}catch(e){app.setNotice(e.message)}finally{setBusy(false)}}]}
+ function Connection({onClose}) {
+  const app=useApp(),[buyer,setBuyer]=R.useState(app.tokens.buyer),[seller,setSeller]=R.useState(app.tokens.seller),[error,setError]=R.useState(''),[busy,setBusy]=R.useState(false);
+  async function save(e){e.preventDefault();setBusy(true);setError('');try{for(const [role,token] of [['buyer',buyer],['seller',seller]])if(token.trim()){const user=await app.api('/api/me',{role,token:token.trim()});if(user.role!==role)throw Error('The '+role+' field contains a '+user.role+' token.');}app.setTokens({buyer:buyer.trim(),seller:seller.trim()});app.setNotice('Demo access updated. Tokens stay in this tab’s memory.');onClose()}catch(e){setError(e.message)}finally{setBusy(false)}}
+  return h('div',{className:'ag-modal-backdrop'},h('section',{className:'ag-modal',role:'dialog','aria-modal':true,'aria-labelledby':'access-title'},h('h2',{id:'access-title'},'Connect demo access'),h('p',null,'Copy the values after DEMO_BUYER_TOKEN= and DEMO_SELLER_TOKEN= in your local .env. Enter the role you need, or both. No admin token is needed.'),h('form',{onSubmit:save},field('Buyer token',buyer,setBuyer,'password'),field('Seller token',seller,setSeller,'password'),h('p',null,'Tokens are cleared when this page reloads.'),error&&h('p',{role:'alert',className:'ag-error'},error),button('Verify and connect',null,{type:'submit',disabled:busy}),button('Close',onClose,{variant:'outline',disabled:busy}))))
+ }
+ function button(label,onClick,{variant='primary',...props}={}){return h('button',{type:'button',className:'button button--'+variant,onClick,...props},label)}
+ function field(label,value,onChange,type='text',props={}){return h('label',{className:'seller-field'},label,type==='textarea'?h('textarea',{value,onChange:e=>onChange(e.target.value),rows:6,...props}):h('input',{type,value,onChange:e=>onChange(e.target.value),...props}))}
+ const link=(text,to,variant='primary')=>h(Link,{to,className:'button button--'+variant},text);
+ const card=(title,...children)=>h('section',{className:'seller-card ag-card'},h('h2',null,title),...children);
+ const json=value=>h('pre',{className:'ag-json'},JSON.stringify(value,null,2));
+ function Shell({title,children,seller=false}){const app=useApp(),location=useLocation();const nav=seller?[['Overview','/seller'],['Register a skill','/seller/register']]:[['Overview','/buyer'],['Explore skills','/buyer/skills'],['Prepare evaluation','/buyer/evaluations/new'],['Evaluation history','/buyer#evaluations']];return h('div',{className:'buyer-app'+(seller?' seller-app':'')},h('aside',{className:'buyer-sidebar'},h(Link,{to:'/',className:'buyer-brand'},'◈ AgentGain'),h('p',{className:'sidebar-label'},seller?'SELLER WORKSPACE':'BUYER WORKSPACE'),h('nav',{className:'buyer-nav'},nav.map(([text,to])=>h(Link,{key:to,to,className:location.pathname+location.hash===to?'active':''},text)),!seller&&app.config.oneintent_enabled&&h('a',{href:'/?view=oneintent'},'Agent Purchases · OneIntent')),h('div',{className:'ag-sidebar-foot'},link(seller?'Buyer workspace':'Seller workspace',seller?'/buyer':'/seller','outline'),button('Connect access',app.openConnection,{variant:'outline'}))),h('div',{className:'buyer-body'},h('header',{className:'buyer-topbar'},h('strong',null,title),h('span',{className:'buyer-demo-label'},app.config.mode==='PAYPAL_SANDBOX'?'PayPal Sandbox':'Local evaluation · no payment')),h('main',{className:'seller-main ag-main'},h('p',{className:'ag-demo-note'},app.config.mode==='PAYPAL_SANDBOX'?'Sandbox checkout: authorization first, evaluation next. Capture and delivery require the backend’s passing result and confirmed payment.':'Real API and model execution. No money authorized or captured. Skill delivery remains locked.'),app.notice&&h('p',{role:'status',className:'ag-notice'},app.notice),children)))}
+ function useLoad(path,role='buyer',deps=[]){const app=useApp(),[data,setData]=R.useState(null),[error,setError]=R.useState(''),[revision,refresh]=R.useReducer(n=>n+1,0);R.useEffect(()=>{let live=true;const controller=new AbortController();setData(null);setError('');if(role&&!app.tokens[role]){setError('Connect your '+role+' token to load this section.');return()=>{live=false}}app.api(path,{role,signal:controller.signal}).then(d=>{if(live)setData(d)}).catch(e=>{if(live&&e.name!=='AbortError')setError(e.message)});return()=>{live=false;controller.abort()}},[path,app.tokens[role],revision,...deps]);return {data,error,refresh}}
+ const loaded=(load,render)=>load.error?h('p',{role:'alert',className:'ag-error'},load.error):load.data?render(load.data):h('p',{role:'status'},'Loading from backend…');
+ function Home(){const app=useApp(),navigate=useNavigate(),load=useLoad('/api/my/contracts');return h(Shell,{title:'Buyer overview'},h('header',{className:'seller-hero ag-hero'},h('div',null,h('h1',null,'Find the skill. Measure the difference.'),h('p',null,'Register a package, agree to a separate test, and compare real model runs.')),link('Explore skills','/buyer/skills')),card('Your evaluation history',button('Refresh history',load.refresh,{variant:'outline'}),loaded(load,data=>data.contracts.length?h('div',{className:'ag-list'},data.contracts.map(c=>h('article',{key:c.contract_id},h('h3',null,c.title),h('p',null,c.contract_id),h('p',null,'Terms: '+c.status+' · Payment: '+c.payment_state+' · Demo: '+(c.demo_status||'Not run')),button('Open evaluation',()=>{app.setIds({skillId:c.skill_id,contractId:c.contract_id,runId:c.demo_run_id||null});navigate('/buyer/evaluations/review')})))):h('p',null,'No contracts yet. Choose a skill to begin.'))))}
+ function Skills(){const load=useLoad('/api/skills',null);return h(Shell,{title:'Explore skills'},h('h1',null,'Skills from your backend'),h('p',null,'Only registered backend packages appear here. Prices describe the seller’s offer. Payment-enabled checkout uses sandbox test money.'),loaded(load,data=>data.skills.length?h('div',{className:'ag-skill-grid'},data.skills.map(s=>card(s.title,h('p',null,s.description),h('p',null,s.version+' · USD '+s.price_usd),h('p',null,(s.supported_tasks||[]).join(', ')),link('View skill','/buyer/skills/'+encodeURIComponent(s.skill_id))))):card('No skills registered',h('p',null,'Open the seller workspace to register your first version.'),link('Register a skill','/seller/register'))))}
+ function Skill(){const app=useApp(),navigate=useNavigate(),id=decodeURIComponent(useLocation().pathname.split('/').pop()),load=useLoad('/api/checkout/'+encodeURIComponent(id),null);return h(Shell,{title:'Skill details'},loaded(load,s=>card(s.title,h('p',null,s.description),h('p',null,'Version '+s.version+' · USD '+s.price_usd),h('p',null,'Seller: '+s.seller_id),h('p',null,'Licence: '+s.licence_terms),h('h3',null,'Seller evaluation policy'),json(s.seller_eval_policy),h('h3',null,'Exact package fingerprint'),h('code',{className:'ag-code'},s.content_sha256),button('Prepare a real evaluation',()=>{app.setIds({skillId:s.skill_id,datasetId:null,contractId:null,runId:null});navigate('/buyer/evaluations/new')}))))}
+ const invoiceSchema={type:'object',properties:{invoiceNumber:{type:'string'},total:{type:'string'},currency:{type:'string'}},required:['invoiceNumber','total','currency'],additionalProperties:false};
+ function Prepare(){const app=useApp(),navigate=useNavigate(),[busy,act]=useAction(),[skill,setSkill]=R.useState(app.ids.skillId||''),[model,setModel]=R.useState(''),[records,setRecords]=R.useState(JSON.stringify(sampleDataset.records,null,2)),[schema,setSchema]=R.useState(JSON.stringify(invoiceSchema,null,2)),[prompt,setPrompt]=R.useState('Extract invoiceNumber, total and currency from the provided invoice text. Return total as a decimal string with two places. Return only JSON.'),[accuracy,setAccuracy]=R.useState('90'),[lift,setLift]=R.useState('20');const skills=useLoad('/api/skills',null);
+  async function prepare(e){e.preventDefault();await act(async()=>{if(!skill)throw Error('Choose a registered skill.');if(app.config.oneintent_enabled&&!app.ids.intentId)throw Error('Start from Agent Purchases to clear a OneIntent purchase before creating a contract.');const raw=JSON.parse(records),rows=Array.isArray(raw)?raw:raw.records_json;if(!Array.isArray(rows))throw Error('Provide an array of evaluation records.');const mapped=rows.map(r=>({input:typeof r.input==='string'?{text:r.input}:r.input,checked_answer:r.checked_answer||r.expected}));const ds=await app.api('/api/datasets/prepare',{body:{records_json:mapped,output_schema_json:JSON.parse(schema),baseline_agent_config:{system_prompt:prompt}}});app.setIds({skillId:skill,datasetId:ds.dataset_id,contractId:null,runId:null});const contract=await app.api('/contracts/',{body:{skill_id:skill,dataset_id:ds.dataset_id,model_name:model||app.config.models[0],purchase_mode:'FULL_SKILL',...(app.config.oneintent_enabled?{intent_id:app.ids.intentId}:{}),evaluation_rules:{min_records:app.config.min_eval_records,min_lift_pct:Number(lift),min_skilled_accuracy_pct:Number(accuracy),max_regressions:0,max_tokens_per_record:1500,require_significance:true,significance_alpha:0.05},failure_policy:{max_technical_retries:0}}});app.setIds({contractId:contract.contract_id});navigate('/buyer/evaluations/review')})}
+  return h(Shell,{title:'Prepare evaluation'},h('h1',null,'Use separate, checked test records.'),h('p',null,'The invoice sample is input data, not a recorded result. Match the schema and checked answers to your chosen skill. The default minimum is '+app.config.min_eval_records+' records.'),h('form',{onSubmit:prepare},card('1 · Skill and baseline',loaded(skills,d=>h('label',{className:'seller-field'},'Registered skill',h('select',{value:skill,onChange:e=>setSkill(e.target.value),required:true},h('option',{value:''},'Choose a skill'),d.skills.map(s=>h('option',{key:s.skill_id,value:s.skill_id},s.title+' · '+s.version))))),h('label',{className:'seller-field'},'Local model',h('select',{value:model||app.config.models[0]||'',onChange:e=>setModel(e.target.value)},app.config.models.map(m=>h('option',{key:m,value:m},m)))),field('Baseline system prompt',prompt,setPrompt,'textarea')),card('2 · Holdout dataset',h('p',null,'JSON array: {input: {...}, checked_answer: {...}}. Invoice-style {id, input: "text", expected: {...}} records are also accepted and converted.'),h('label',{className:'seller-field'},'Upload JSON dataset',h('input',{type:'file',accept:'.json,application/json',onChange:e=>{const f=e.target.files[0];if(f)act(async()=>{if(f.size>5000000)throw Error('File exceeds 5 MB.');const text=await f.text();JSON.parse(text);setRecords(text)})}})),field('Evaluation records JSON',records,setRecords,'textarea',{rows:12}),field('Output JSON Schema',schema,setSchema,'textarea')),card('3 · Purchase evaluation rules',h('div',{className:'ag-two'},field('Minimum skilled accuracy (%)',accuracy,setAccuracy,'number',{min:0,max:100,required:true}),field('Minimum lift (percentage points)',lift,setLift,'number',{min:0,max:100,required:true})),h('p',null,'Zero regressions · 1500-token scoring cap · significance requested · no technical retries. Full terms are frozen only after your approval.'),button(busy?'Preparing…':'Prepare dataset and review contract',null,{type:'submit',disabled:busy}))))
+ }
+ const PaymentPanel=createPaymentPanel({React:R,useApp,card,button,json,evidence});
+ function Review(){const app=useApp(),navigate=useNavigate(),[busy,act]=useAction(),[consent,setConsent]=R.useState(false),[resume,setResume]=R.useState(app.ids.contractId||''),load=useLoad('/contracts/'+encodeURIComponent(app.ids.contractId||'missing'));return h(Shell,{title:'Review contract'},h('h1',null,'Review the exact agreed terms.'),card('Resume an existing contract',field('Contract ID',resume,setResume),button('Load contract',()=>{setConsent(false);app.setIds({contractId:resume.trim(),runId:null})},{variant:'outline'})),!app.ids.contractId?card('No contract selected',link('Prepare an evaluation','/buyer/evaluations/new')):loaded(load,c=>card('Contract '+c.contract_id,h('p',null,'Status: '+c.status+' · Payment: '+c.payment_state),json(c.terms),h('p',null,'Terms fingerprint'),h('code',{className:'ag-code'},c.terms_hash),c.status==='DRAFT'?h(R.Fragment,null,h('label',{className:'ag-check'},h('input',{type:'checkbox',checked:consent,onChange:e=>setConsent(e.target.checked)}),'I have reviewed and approve these displayed terms.'),button(busy?'Approving…':'Approve these terms',()=>act(async()=>{await app.api('/contracts/'+encodeURIComponent(c.contract_id)+'/approve',{body:{contract_version:c.contract_version,terms_hash:c.terms_hash}});setConsent(false);load.refresh()}),{disabled:busy||!consent})):h(R.Fragment,null,app.config.mode==='PAYPAL_SANDBOX'&&h(PaymentPanel,{key:c.contract_id,contract:c}),h('p',null,'Optional unpaid demo: separate results, no payment or licence. Use demo_worker.py for this option.'),button(busy?'Queuing…':'Run demo evaluation — no payment',()=>act(async()=>{const run=await app.api('/demo/contracts/'+encodeURIComponent(c.contract_id)+'/run',{body:{}});app.setIds({runId:run.run_id});navigate('/buyer/evaluations/progress')}),{disabled:busy||c.payment_state!=='UNINITIALIZED'}))))) }
+ function useRun(poll){const app=useApp(),[data,setData]=R.useState(null),[error,setError]=R.useState(''),[revision,refresh]=R.useReducer(n=>n+1,0);R.useEffect(()=>{if(!app.ids.runId)return;if(!app.tokens.buyer){setError('Connect your buyer token to view this run.');return;}let live=true,timer,controller=new AbortController();setError('');setData(null);async function tick(){try{const d=await app.api('/demo/runs/'+encodeURIComponent(app.ids.runId),{signal:controller.signal});if(!live)return;setData(d);if(poll&&!['COMPLETED','TECHNICAL_ERROR'].includes(d.status))timer=setTimeout(tick,3000)}catch(e){if(live&&e.name!=='AbortError')setError(e.message)}}tick();return()=>{live=false;controller.abort();clearTimeout(timer)}},[app.ids.runId,app.tokens.buyer,poll,revision]);return {data,error,refresh}}
+ function RunView({results=false}){const app=useApp(),load=useRun(true),[resume,setResume]=R.useState(app.ids.runId||'');return h(Shell,{title:results?'Evaluation results':'Evaluation progress'},h('h1',null,results?'Evidence from recorded execution.':'Your model comparison.'),card('Resume a demo run',field('Demo Run ID',resume,setResume),button('Load run',()=>app.setIds({runId:resume.trim()}),{variant:'outline'})),!app.ids.runId?card('No run selected',link('Review your contract','/buyer/evaluations/review')):loaded(load,d=>h(R.Fragment,null,card('Run status',h('p',{role:'status'},d.status+' · '+d.completed_records+' record pairs completed'),h('code',{className:'ag-code'},d.run_id),h('p',null,'Contract: '+d.contract_id),h('p',null,'No payment processed. Capture and delivery remain unavailable.'),d.status==='QUEUED'&&h('p',null,'Waiting for demo_worker.py. Keep that terminal running.'),d.status==='RUNNING'&&h('p',null,'Each record runs twice. Local model execution may take several minutes.'),button('Refresh',load.refresh,{variant:'outline'}),!results&&link('Open results','/buyer/evaluations/results')),card('Comparison summary',d.summary?h(R.Fragment,null,h('h3',null,d.summary.verdict),h('p',null,d.summary.reason),h('div',{className:'ag-metrics'},metric('Baseline',d.summary.baseline_accuracy_pct,'%'),metric('With skill',d.summary.skilled_accuracy_pct,'%'),metric('Lift',d.summary.net_lift_pct,' pp')),json(d.summary)):h('p',null,'No final verdict yet. No scores are invented while the worker runs.')),card('Record evidence',h('p',null,'Skilled output text is locked in unpaid demos. The table shows actual checks and resource usage.'),evidence(d.rows)),link('Run another evaluation','/buyer/evaluations/new'))))}
+ const metric=(label,value,suffix)=>h('div',null,h('span',null,label),h('strong',null,value===undefined||value===null?'—':String(value)+suffix));
+ function evidence(rows){const columns=['record_index','baseline_passed','skilled_passed','comparison_status','baseline_tokens','skilled_tokens','baseline_ms','skilled_ms','baseline_infra_error','skilled_infra_error'];return h('div',{className:'seller-table-scroll'},h('table',{className:'seller-table'},h('thead',null,h('tr',null,columns.map(c=>h('th',{key:c},c.replaceAll('_',' '))))),h('tbody',null,rows.length?rows.map(r=>h('tr',{key:r.record_index},columns.map(c=>h('td',{key:c},r[c]===null||r[c]===undefined?'—':String(r[c]))))):h('tr',null,h('td',{colSpan:columns.length},'No completed record pairs yet.')))))}
+ function Register(){const app=useApp(),[busy,act]=useAction(),[draft,setDraft]=R.useState({...sampleSkill,tasks:'invoice_extraction'}),[registered,setRegistered]=R.useState(null);const change=key=>value=>setDraft(previous=>({...previous,[key]:value}));async function submit(e){e.preventDefault();await act(async()=>{let output;try{output=JSON.parse(draft.exampleOutput)}catch{throw Error('Public example output must be valid JSON.');}const payload={version:draft.version,title:draft.name,description:draft.description,instructions_md:draft.instructions,examples_json:[{input:{text:draft.exampleInput},output}],supported_tasks:draft.tasks.split(',').map(s=>s.trim()).filter(Boolean),price_usd:draft.price,currency:'USD',licence_terms:draft.licence,seller_eval_policy:{min_records:3,max_tokens_per_record:1500}};const r=await app.api('/api/skills/register',{role:'seller',body:payload});setRegistered(r);app.setIds({skillId:r.skill_id});app.setNotice('Skill version saved in PostgreSQL.');})}return h(Shell,{title:'Register a skill',seller:true},h('h1',null,'Give your skill a clear promise.'),h('form',{onSubmit:submit},card('Describe the skill',field('Name',draft.name,change('name'),'text',{required:true}),field('Description',draft.description,change('description'),'textarea',{required:true}),field('Supported task names (comma separated)',draft.tasks,change('tasks'),'text',{required:true})),card('Define the exact version',field('Version',draft.version,change('version'),'text',{required:true}),field('Skill instructions',draft.instructions,change('instructions'),'textarea',{required:true,maxLength:40000}),field('Public example input',draft.exampleInput,change('exampleInput'),'textarea',{required:true}),field('Public example output JSON',draft.exampleOutput,change('exampleOutput'),'textarea',{required:true})),card('Set the offer',field('Price (USD)',draft.price,change('price'),'number',{required:true,min:'0.01',step:'0.01'}),field('Licence terms',draft.licence,change('licence'),'textarea',{required:true}),h('p',null,'Published evaluation policy: at least 3 records and at most 1500 scored tokens per record. The server computes the package hash.'),button(busy?'Registering…':'Register this version',null,{type:'submit',disabled:busy||!!registered}))),registered&&card('Version registered on the backend',json(registered),h('p',null,'Buyer checkout link'),h('a',{href:'/buyer/skills/'+encodeURIComponent(registered.skill_id)},location.origin+'/buyer/skills/'+registered.skill_id),link('My listings','/seller')))}
+ function Seller(){const app=useApp(),load=useLoad('/api/seller/skills','seller'),[selected,setSelected]=R.useState(''),[stats,setStats]=R.useState(null),[busy,act]=useAction();return h(Shell,{title:'Seller overview',seller:true},h('header',{className:'seller-hero ag-hero'},h('div',null,h('h1',null,'Your skills, ready to test.'),h('p',null,'Listings are stored on the backend. Demo evaluations and payment outcomes are shown separately.')),link('Register a skill','/seller/register')),card('My listings',button('Refresh listings',load.refresh,{variant:'outline'}),loaded(load,d=>d.skills.length?h('div',{className:'ag-list'},d.skills.map(s=>h('article',{key:s.skill_id},h('h3',null,s.title),h('p',null,s.description),h('p',null,s.version+' · USD '+s.price_usd),h('code',{className:'ag-code'},s.content_sha256),h('div',{className:'ag-actions'},link('Buyer view','/buyer/skills/'+encodeURIComponent(s.skill_id),'outline'),button('Copy checkout link',()=>act(async()=>{await navigator.clipboard.writeText(location.origin+'/buyer/skills/'+encodeURIComponent(s.skill_id));app.setNotice('Checkout link copied. Localhost links work on this computer.')}),{variant:'outline',disabled:busy}),button('View actual activity',()=>act(async()=>{const [funnel,outcomes,demo]=await Promise.all([app.api('/analytics/seller/'+encodeURIComponent(s.skill_id)+'/funnel',{role:'seller'}),app.api('/analytics/seller/'+encodeURIComponent(s.skill_id)+'/outcomes',{role:'seller'}),app.api('/api/seller/'+encodeURIComponent(s.skill_id)+'/demo-outcomes',{role:'seller'})]);setSelected(s.title);setStats({demo_evaluations:demo,payment_funnel:funnel,purchase_outcomes:outcomes})}),{disabled:busy}))))):h('p',null,'No seller listings yet. Register your first version.'))),stats&&card('Activity · '+selected,h('p',null,'Demo evaluations are not purchases or revenue. Buyer records and checked answers are private.'),json(stats)))}
+ function Locked(){return h(Shell,{title:'Skill delivery'},card('Skill delivery is locked',h('p',null,'This local demo has not processed a payment or issued a licence. You can inspect evaluation metrics in the results screen.'),link('Evaluation history','/buyer#evaluations')))}
+ return {Provider,Home,Skills,Skill,Prepare,Review,Progress:()=>h(RunView),Results:()=>h(RunView,{results:true}),Register,Seller,Locked};
+}
+
+
 
 var e=Object.create,t=Object.defineProperty,n=Object.getOwnPropertyDescriptor,r=Object.getOwnPropertyNames,i=Object.getPrototypeOf,a=Object.prototype.hasOwnProperty,o=(e,t)=>()=>(t||(e((t={exports:{}}).exports,t,t.exports),e=null),t.exports),s=(e,i,o,s)=>{if(i&&typeof i==`object`||typeof i==`function`)for(var c=r(i),l=0,u=c.length,d;l<u;l++)d=c[l],!a.call(e,d)&&d!==o&&t(e,d,{get:(e=>i[e]).bind(null,d),enumerable:!(s=n(i,d))||s.enumerable});return e},c=(n,r,o)=>(o=n==null?{}:e(i(n)),s(r||!n||!n.__esModule||!a.call(n,`default`)?t(o,`default`,{value:n,enumerable:!0}):o,n));(function(){let e=document.createElement(`link`).relList;if(e&&e.supports&&e.supports(`modulepreload`))return;for(let e of document.querySelectorAll(`link[rel="modulepreload"]`))n(e);new MutationObserver(e=>{for(let t of e)if(t.type===`childList`)for(let e of t.addedNodes)e.tagName===`LINK`&&e.rel===`modulepreload`&&n(e)}).observe(document,{childList:!0,subtree:!0});function t(e){let t={};return e.integrity&&(t.integrity=e.integrity),e.referrerPolicy&&(t.referrerPolicy=e.referrerPolicy),t.credentials=e.crossOrigin===`use-credentials`?`include`:e.crossOrigin===`anonymous`?`omit`:`same-origin`,t}function n(e){if(e.ep)return;e.ep=!0;let n=t(e);fetch(e.href,n)}})();var l=`data:image/svg+xml,%3csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2040%2040'%3e%3crect%20width='40'%20height='40'%20rx='10'%20fill='%23101e2b'/%3e%3cpath%20d='M8%2030%2020%208l12%2022h-6l-6-12-6%2012Zm10%200%204-7%204%207Z'%20fill='%23f4eee4'/%3e%3c/svg%3e`,u=`/assets/poster-C_fVClGE.jpg`,d=`/assets/process-original-C2OggacH.png`,f=`/assets/reference-2-DtcabcZY.png`,p=`/assets/reference-1-4jaUo-DO.png`,m=`/assets/reference-2-DtcabcZY.png`,h=o((e=>{var t=Symbol.for(`react.transitional.element`),n=Symbol.for(`react.portal`),r=Symbol.for(`react.fragment`),i=Symbol.for(`react.strict_mode`),a=Symbol.for(`react.profiler`),o=Symbol.for(`react.consumer`),s=Symbol.for(`react.context`),c=Symbol.for(`react.forward_ref`),l=Symbol.for(`react.suspense`),u=Symbol.for(`react.memo`),d=Symbol.for(`react.lazy`),f=Symbol.for(`react.activity`),p=Symbol.for(`react.view_transition`),m=Symbol.iterator;function h(e){return typeof e!=`object`||!e?null:(e=m&&e[m]||e[`@@iterator`],typeof e==`function`?e:null)}var g={isMounted:function(){return!1},enqueueForceUpdate:function(){},enqueueReplaceState:function(){},enqueueSetState:function(){}},_=Object.assign,v={};function y(e,t,n){this.props=e,this.context=t,this.refs=v,this.updater=n||g}y.prototype.isReactComponent={},y.prototype.setState=function(e,t){if(typeof e!=`object`&&typeof e!=`function`&&e!=null)throw Error(`takes an object of state variables to update or a function which returns an object of state variables.`);this.updater.enqueueSetState(this,e,t,`setState`)},y.prototype.forceUpdate=function(e){this.updater.enqueueForceUpdate(this,e,`forceUpdate`)};function b(){}b.prototype=y.prototype;function x(e,t,n){this.props=e,this.context=t,this.refs=v,this.updater=n||g}var S=x.prototype=new b;S.constructor=x,_(S,y.prototype),S.isPureReactComponent=!0;var C=Array.isArray;function w(){}var T={H:null,A:null,T:null,S:null},E=Object.prototype.hasOwnProperty;function D(e,n,r){var i=r.ref;return{$$typeof:t,type:e,key:n,ref:i===void 0?null:i,props:r}}function O(e,t){return D(e.type,t,e.props)}function k(e){return typeof e==`object`&&!!e&&e.$$typeof===t}function A(e){var t={"=":`=0`,":":`=2`};return`$`+e.replace(/[=:]/g,function(e){return t[e]})}var j=/\/+/g;function M(e,t){return typeof e==`object`&&e&&e.key!=null?A(``+e.key):t.toString(36)}function ee(e){switch(e.status){case`fulfilled`:return e.value;case`rejected`:throw e.reason;default:switch(typeof e.status==`string`?e.then(w,w):(e.status=`pending`,e.then(function(t){e.status===`pending`&&(e.status=`fulfilled`,e.value=t)},function(t){e.status===`pending`&&(e.status=`rejected`,e.reason=t)})),e.status){case`fulfilled`:return e.value;case`rejected`:throw e.reason}}throw e}function N(e,r,i,a,o){var s=typeof e;(s===`undefined`||s===`boolean`)&&(e=null);var c=!1;if(e===null)c=!0;else switch(s){case`bigint`:case`string`:case`number`:c=!0;break;case`object`:switch(e.$$typeof){case t:case n:c=!0;break;case d:return c=e._init,N(c(e._payload),r,i,a,o)}}if(c)return o=o(e),c=a===``?`.`+M(e,0):a,C(o)?(i=``,c!=null&&(i=c.replace(j,`$&/`)+`/`),N(o,r,i,``,function(e){return e})):o!=null&&(k(o)&&(o=O(o,i+(o.key==null||e&&e.key===o.key?``:(``+o.key).replace(j,`$&/`)+`/`)+c)),r.push(o)),1;c=0;var l=a===``?`.`:a+`:`;if(C(e))for(var u=0;u<e.length;u++)a=e[u],s=l+M(a,u),c+=N(a,r,i,s,o);else if(u=h(e),typeof u==`function`)for(e=u.call(e),u=0;!(a=e.next()).done;)a=a.value,s=l+M(a,u++),c+=N(a,r,i,s,o);else if(s===`object`){if(typeof e.then==`function`)return N(ee(e),r,i,a,o);throw r=String(e),Error(`Objects are not valid as a React child (found: `+(r===`[object Object]`?`object with keys {`+Object.keys(e).join(`, `)+`}`:r)+`). If you meant to render a collection of children, use an array instead.`)}return c}function te(e,t,n){if(e==null)return e;var r=[],i=0;return N(e,r,``,``,function(e){return t.call(n,e,i++)}),r}function ne(e){if(e._status===-1){var t=e._result,n=t();n.then(function(t){(e._status===0||e._status===-1)&&(e._status=1,e._result=t,n.status===void 0&&(n.status=`fulfilled`,n.value=t))},function(t){(e._status===0||e._status===-1)&&(e._status=2,e._result=t,n.status===void 0&&(n.status=`rejected`,n.reason=t))}),e._status===-1&&(e._status=0,e._result=n)}if(e._status===1)return e._result.default;throw e._result}var re=typeof reportError==`function`?reportError:function(e){if(typeof window==`object`&&typeof window.ErrorEvent==`function`){var t=new window.ErrorEvent(`error`,{bubbles:!0,cancelable:!0,message:typeof e==`object`&&e&&typeof e.message==`string`?String(e.message):String(e),error:e});if(!window.dispatchEvent(t))return}else if(typeof process==`object`&&typeof process.emit==`function`){process.emit(`uncaughtException`,e);return}console.error(e)};function ie(e){var t=T.T,n={};n.types=t===null?null:t.types,T.T=n;try{var r=e(),i=T.S;i!==null&&i(n,r),typeof r==`object`&&r&&typeof r.then==`function`&&r.then(w,re)}catch(e){re(e)}finally{t!==null&&n.types!==null&&(t.types=n.types),T.T=t}}function ae(e){var t=T.T;if(t!==null){var n=t.types;n===null?t.types=[e]:n.indexOf(e)===-1&&n.push(e)}else ie(ae.bind(null,e))}var oe={map:te,forEach:function(e,t,n){te(e,function(){t.apply(this,arguments)},n)},count:function(e){var t=0;return te(e,function(){t++}),t},toArray:function(e){return te(e,function(e){return e})||[]},only:function(e){if(!k(e))throw Error(`React.Children.only expected to receive a single React element child.`);return e}};e.Activity=f,e.Children=oe,e.Component=y,e.Fragment=r,e.Profiler=a,e.PureComponent=x,e.StrictMode=i,e.Suspense=l,e.ViewTransition=p,e.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE=T,e.__COMPILER_RUNTIME={__proto__:null,c:function(e){return T.H.useMemoCache(e)}},e.addTransitionType=ae,e.cache=function(e){return function(){return e.apply(null,arguments)}},e.cacheSignal=function(){return null},e.cloneElement=function(e,t,n){if(e==null)throw Error(`The argument must be a React element, but you passed `+e+`.`);var r=_({},e.props),i=e.key;if(t!=null)for(a in t.key!==void 0&&(i=``+t.key),t)!E.call(t,a)||a===`key`||a===`__self`||a===`__source`||a===`ref`&&t.ref===void 0||(r[a]=t[a]);var a=arguments.length-2;if(a===1)r.children=n;else if(1<a){for(var o=Array(a),s=0;s<a;s++)o[s]=arguments[s+2];r.children=o}return D(e.type,i,r)},e.createContext=function(e){return e={$$typeof:s,_currentValue:e,_currentValue2:e,_threadCount:0,Provider:null,Consumer:null},e.Provider=e,e.Consumer={$$typeof:o,_context:e},e},e.createElement=function(e,t,n){var r,i={},a=null;if(t!=null)for(r in t.key!==void 0&&(a=``+t.key),t)E.call(t,r)&&r!==`key`&&r!==`__self`&&r!==`__source`&&(i[r]=t[r]);var o=arguments.length-2;if(o===1)i.children=n;else if(1<o){for(var s=Array(o),c=0;c<o;c++)s[c]=arguments[c+2];i.children=s}if(e&&e.defaultProps)for(r in o=e.defaultProps,o)i[r]===void 0&&(i[r]=o[r]);return D(e,a,i)},e.createRef=function(){return{current:null}},e.forwardRef=function(e){return{$$typeof:c,render:e}},e.isValidElement=k,e.lazy=function(e){return{$$typeof:d,_payload:{_status:-1,_result:e},_init:ne}},e.memo=function(e,t){return{$$typeof:u,type:e,compare:t===void 0?null:t}},e.startTransition=ie,e.unstable_useCacheRefresh=function(){return T.H.useCacheRefresh()},e.use=function(e){return T.H.use(e)},e.useActionState=function(e,t,n){return T.H.useActionState(e,t,n)},e.useCallback=function(e,t){return T.H.useCallback(e,t)},e.useContext=function(e){return T.H.useContext(e)},e.useDebugValue=function(){},e.useDeferredValue=function(e,t){return T.H.useDeferredValue(e,t)},e.useEffect=function(e,t){return T.H.useEffect(e,t)},e.useEffectEvent=function(e){return T.H.useEffectEvent(e)},e.useId=function(){return T.H.useId()},e.useImperativeHandle=function(e,t,n){return T.H.useImperativeHandle(e,t,n)},e.useInsertionEffect=function(e,t){return T.H.useInsertionEffect(e,t)},e.useLayoutEffect=function(e,t){return T.H.useLayoutEffect(e,t)},e.useMemo=function(e,t){return T.H.useMemo(e,t)},e.useOptimistic=function(e,t){return T.H.useOptimistic(e,t)},e.useReducer=function(e,t,n){return T.H.useReducer(e,t,n)},e.useRef=function(e){return T.H.useRef(e)},e.useState=function(e){return T.H.useState(e)},e.useSyncExternalStore=function(e,t,n){return T.H.useSyncExternalStore(e,t,n)},e.useTransition=function(){return T.H.useTransition()},e.version=`19.3.1`})),g=o(((e,t)=>{t.exports=h()})),_=c(g(),1),v=/^(?:[a-z][a-z0-9+.-]*:|[\\/]{2})/i,y=/^[\\/]{2}/;function b(e,t){return t+e.replace(/\\/g,`/`)}var x=`popstate`;function S(e){return typeof e==`object`&&!!e&&`pathname`in e&&`search`in e&&`hash`in e&&`state`in e&&`key`in e}function C(e={}){function t(e,t){let n=t.state?.masked,{pathname:r,search:i,hash:a}=n||e.location;return O(``,{pathname:r,search:i,hash:a},t.state&&t.state.usr||null,t.state&&t.state.key||`default`,n?{pathname:e.location.pathname,search:e.location.search,hash:e.location.hash}:void 0)}function n(e,t){return typeof t==`string`?t:k(t)}return j(t,n,null,e)}function w(e,t){if(e===!1||e==null)throw Error(t)}function T(e,t){if(!e){typeof console<`u`&&console.warn(t);try{throw Error(t)}catch{}}}function E(){return Math.random().toString(36).substring(2,10)}function D(e,t){return{usr:e.state,key:e.key,idx:t,masked:e.mask?{pathname:e.pathname,search:e.search,hash:e.hash}:void 0}}function O(e,t,n=null,r,i){return{pathname:typeof e==`string`?e:e.pathname,search:``,hash:``,...typeof t==`string`?A(t):t,state:n,key:t&&t.key||r||E(),mask:i}}function k({pathname:e=`/`,search:t=``,hash:n=``}){return t&&t!==`?`&&(e+=t.charAt(0)===`?`?t:`?`+t),n&&n!==`#`&&(e+=n.charAt(0)===`#`?n:`#`+n),e}function A(e){let t={};if(e){let n=e.indexOf(`#`);n>=0&&(t.hash=e.substring(n),e=e.substring(0,n));let r=e.indexOf(`?`);r>=0&&(t.search=e.substring(r),e=e.substring(0,r)),e&&(t.pathname=e)}return t}function j(e,t,n,r={}){let{window:i=document.defaultView,v5Compat:a=!1}=r,o=i.history,s=`POP`,c=null,l=u();l??(l=0,o.replaceState({...o.state,idx:l},``));function u(){return(o.state||{idx:null}).idx}function d(){s=`POP`;let e=u(),t=e==null?null:e-l;l=e,c&&c({action:s,location:h.location,delta:t})}function f(e,t){s=`PUSH`;let r=S(e)?e:O(h.location,e,t);n&&n(r,e),l=u()+1;let d=D(r,l),f=h.createHref(r.mask||r);try{o.pushState(d,``,f)}catch(e){if(e instanceof DOMException&&e.name===`DataCloneError`)throw e;i.location.assign(f)}a&&c&&c({action:s,location:h.location,delta:1})}function p(e,t){s=`REPLACE`;let r=S(e)?e:O(h.location,e,t);n&&n(r,e),l=u();let i=D(r,l),d=h.createHref(r.mask||r);o.replaceState(i,``,d),a&&c&&c({action:s,location:h.location,delta:0})}function m(e){return M(i,e)}let h={get action(){return s},get location(){return e(i,o)},listen(e){if(c)throw Error(`A history only accepts one active listener`);return i.addEventListener(x,d),c=e,()=>{i.removeEventListener(x,d),c=null}},createHref(e){return t(i,e)},createURL:m,encodeLocation(e){let t=m(e);return{pathname:t.pathname,search:t.search,hash:t.hash}},push:f,replace:p,go(e){return o.go(e)}};return h}function M(e,t,n=!1){let r=`http://localhost`;e&&(r=e.location.origin===`null`?e.location.href:e.location.origin),w(r,`No window.location.(origin|href) available to create URL`);let i=typeof t==`string`?t:k(t);return i=i.replace(/ $/,`%20`),!n&&y.test(i)&&(i=r+i),new URL(i,r)}function ee(e,t,n=`/`){return N(e,t,n,!1)}function N(e,t,n,r,i){let a=_e((typeof t==`string`?A(t):t).pathname||`/`,n);if(a==null)return null;let o=i??te(e),s=null,c=ge(a);for(let e=0;s==null&&e<o.length;++e)s=me(o[e],c,r);return s}function te(e){let t=ne(e);return ie(t),t}function ne(e,t=[],n=[],r=``,i=!1){let a=(e,a,o=i,s)=>{let c={relativePath:s===void 0?e.path||``:s,caseSensitive:e.caseSensitive===!0,childrenIndex:a,route:e};if(c.relativePath.startsWith(`/`)){if(!c.relativePath.startsWith(r)&&o)return;w(c.relativePath.startsWith(r),`Absolute route path "${c.relativePath}" nested under path "${r}" is not valid. An absolute child route path must start with the combined path of all its parent routes.`),c.relativePath=c.relativePath.slice(r.length)}let l=Ce([r,c.relativePath]),u=n.concat(c);e.children&&e.children.length>0&&(w(e.index!==!0,`Index routes must not have child routes. Please remove all child routes from route path "${l}".`),ne(e.children,t,u,l,o)),(e.path!=null||e.index)&&t.push({path:l,score:fe(l,e.index),routesMeta:u.map((e,t)=>{let[n,r]=he(e.relativePath,e.caseSensitive,t===u.length-1);return{...e,matcher:n,compiledParams:r}})})};return e.forEach((e,t)=>{if(e.path===``||!e.path?.includes(`?`))a(e,t);else for(let n of re(e.path))a(e,t,!0,n)}),t}function re(e){let t=e.split(`/`);if(t.length===0)return[];let[n,...r]=t,i=n.endsWith(`?`),a=n.replace(/\?$/,``);if(r.length===0)return i?[a,``]:[a];let o=re(r.join(`/`)),s=[];return s.push(...o.map(e=>e===``?a:[a,e].join(`/`))),i&&s.push(...o),s.map(t=>e.startsWith(`/`)&&t===``?`/`:t)}function ie(e){e.sort((e,t)=>e.score===t.score?pe(e.routesMeta.map(e=>e.childrenIndex),t.routesMeta.map(e=>e.childrenIndex)):t.score-e.score)}var ae=/^:[\w-]+$/,oe=3,se=2,ce=1,le=10,ue=-2,de=e=>e===`*`;function fe(e,t){let n=e.split(`/`),r=n.length;return n.some(de)&&(r+=ue),t&&(r+=se),n.filter(e=>!de(e)).reduce((e,t)=>e+(ae.test(t)?oe:t===``?ce:le),r)}function pe(e,t){return e.length===t.length&&e.slice(0,-1).every((e,n)=>e===t[n])?e[e.length-1]-t[t.length-1]:0}function me(e,t,n=!1){let{routesMeta:r}=e,i={},a=`/`,o=[];for(let e=0;e<r.length;++e){let s=r[e],c=e===r.length-1,l=a===`/`?t:t.slice(a.length)||`/`,u={path:s.relativePath,caseSensitive:s.caseSensitive,end:c},d=s.matcher&&s.compiledParams?F(u,l,s.matcher,s.compiledParams):P(u,l),f=s.route;if(!d&&c&&n&&!r[r.length-1].route.index&&(d=P({path:s.relativePath,caseSensitive:s.caseSensitive,end:!1},l)),!d)return null;Object.assign(i,d.params),o.push({params:i,pathname:Ce([a,d.pathname]),pathnameBase:we(Ce([a,d.pathnameBase])),route:f}),d.pathnameBase!==`/`&&(a=Ce([a,d.pathnameBase]))}return o}function P(e,t){typeof e==`string`&&(e={path:e,caseSensitive:!1,end:!0});let[n,r]=he(e.path,e.caseSensitive,e.end);return F(e,t,n,r)}function F(e,t,n,r){let i=t.match(n);if(!i)return null;let a=i[0],o=R(a,1),s=i.slice(1);return{params:r.reduce((e,{paramName:t,isOptional:n},r)=>{if(t===`*`){let e=s[r]||``;o=R(a.slice(0,a.length-e.length),1)}let i=s[r];return e[t]=n&&!i?void 0:(i||``).replace(/%2F/g,`/`),e},{}),pathname:a,pathnameBase:o,pattern:e}}function he(e,t=!1,n=!0){T(e===`*`||!e.endsWith(`*`)||e.endsWith(`/*`),`Route path "${e}" will be treated as if it were "${e.replace(/\*$/,`/*`)}" because the \`*\` character must always follow a \`/\` in the pattern. To get rid of this warning, please change the route path to "${e.replace(/\*$/,`/*`)}".`);let r=[],i=`^`+e.replace(/\/*\*?$/,``).replace(/^\/*/,`/`).replace(/[\\.*+^${}|()[\]]/g,`\\$&`).replace(/\/:([\w-]+)(\?)?/g,(e,t,n,i,a)=>{if(r.push({paramName:t,isOptional:n!=null}),n){let t=a.charAt(i+e.length);return t&&t!==`/`?`/([^\\/]*)`:`(?:/([^\\/]*))?`}return`/([^\\/]+)`}).replace(/\/([\w-]+)\?(\/|$)/g,`(/$1)?$2`);return e.endsWith(`*`)?(r.push({paramName:`*`}),i+=e===`*`||e===`/*`?`(.*)$`:`(?:\\/(.+)|\\/*)$`):n?i+=`\\/*$`:e!==``&&e!==`/`&&(i+=`(?:(?=\\/|$))`),[new RegExp(i,t?void 0:`i`),r]}function ge(e){try{return e.split(`/`).map(e=>decodeURIComponent(e).replace(/\//g,`%2F`)).join(`/`)}catch(t){return T(!1,`The URL path "${e}" could not be decoded because it is a malformed URL segment. This is probably due to a bad percent encoding (${t}).`),e}}function _e(e,t){if(t===`/`)return e;if(!e.toLowerCase().startsWith(t.toLowerCase()))return null;let n=t.endsWith(`/`)?t.length-1:t.length,r=e.charAt(n);return r&&r!==`/`?null:e.slice(n)||`/`}function ve(e,t=`/`){let{pathname:n,search:r=``,hash:i=``}=typeof e==`string`?A(e):e,a;return n?(n=L(n),a=n.startsWith(`/`)||n.startsWith(`\\`)?I(n.substring(1),`/`):I(n,t)):a=t,{pathname:a,search:Te(r),hash:Ee(i)}}function I(e,t){let n=R(t).split(`/`);return e.split(`/`).forEach(e=>{e===`..`?n.length>1&&n.pop():e!==`.`&&n.push(e)}),n.length>1?n.join(`/`):`/`}function ye(e,t,n,r){return`Cannot include a '${e}' character in a manually specified \`to.${t}\` field [${JSON.stringify(r)}].  Please separate it out to the \`to.${n}\` field. Alternatively you may provide the full path as a string in <Link to="..."> and the router will parse it for you.`}function be(e){return e.filter((e,t)=>t===0||e.route.path&&e.route.path.length>0)}function xe(e){let t=be(e);return t.map((e,n)=>n===t.length-1?e.pathname:e.pathnameBase)}function Se(e,t,n,r=!1){let i;typeof e==`string`?i=A(e):(i={...e},w(!i.pathname||!i.pathname.includes(`?`),ye(`?`,`pathname`,`search`,i)),w(!i.pathname||!i.pathname.includes(`#`),ye(`#`,`pathname`,`hash`,i)),w(!i.search||!i.search.includes(`#`),ye(`#`,`search`,`hash`,i)));let a=e===``||i.pathname===``,o=a?`/`:i.pathname,s;if(o==null)s=n;else{let e=t.length-1;if(!r&&o.startsWith(`..`)){let t=o.split(`/`);for(;t[0]===`..`;)t.shift(),--e;i.pathname=t.join(`/`)}s=e>=0?t[e]:`/`}let c=ve(i,s),l=o&&o!==`/`&&o.endsWith(`/`),u=(a||o===`.`)&&n.endsWith(`/`);return!c.pathname.endsWith(`/`)&&(l||u)&&(c.pathname+=`/`),c}var L=e=>e.replace(/[\\/]{2,}/g,`/`),Ce=e=>L(e.join(`/`));function R(e,t=0){let n=e.length;for(;n>t&&e.charCodeAt(n-1)===47;)n--;return n===e.length?e:e.slice(0,n)}var we=e=>R(e).replace(/^\/*/,`/`),Te=e=>!e||e===`?`?``:e.startsWith(`?`)?e:`?`+e,Ee=e=>!e||e===`#`?``:e.startsWith(`#`)?e:`#`+e,De=class{constructor(e,t,n,r=!1){this.status=e,this.statusText=t||``,this.internal=r,n instanceof Error?(this.data=n.toString(),this.error=n):this.data=n}};function Oe(e){return e!=null&&typeof e.status==`number`&&typeof e.statusText==`string`&&typeof e.internal==`boolean`&&`data`in e}function ke(e){return Ce(e.map(e=>e.route.path).filter(Boolean))||`/`}var Ae=typeof window<`u`&&window.document!==void 0&&window.document.createElement!==void 0;function je(e,t){let n=e;if(typeof n!=`string`||!v.test(n))return{absoluteURL:void 0,isExternal:!1,to:n};let r=n,i=!1;if(Ae)try{let e=new URL(window.location.href),r=y.test(n)?new URL(b(n,e.protocol)):new URL(n),a=_e(r.pathname,t);r.origin===e.origin&&a!=null?n=a+r.search+r.hash:i=!0}catch{T(!1,`<Link to="${n}"> contains an invalid URL which will probably break when clicked - please update to a valid URL path.`)}return{absoluteURL:r,isExternal:i,to:n}}Object.getOwnPropertyNames(Object.prototype).sort().join(`\0`);var Me=new URL(`http://localhost`);function Ne(e){if(e.createURL)return e.createURL(`/`);try{return new URL(e.createHref(`/`),Me)}catch{return Me}}function z(e,t){return e.origin===t.origin&&(e.origin!==`null`||e.protocol===t.protocol&&e.host===t.host)}function Pe(e,t){if(e.startsWith(`//`))return!0;let n=t.protocol.toLowerCase();return e.toLowerCase().startsWith(n)?t.host===``||e.slice(n.length).startsWith(`//`):!1}function Fe(e,t,n,r){let i=null;try{i=e==null?null:new URL(e,n)}catch{}let a=new URL(t,n),o=i!=null&&!z(i,n),s=!z(a,n);if(r===`reject`){if(o||s)throw Error(`External navigation is not allowed`)}else if(s&&(i==null||!Pe(e,i)||!z(i,a)))throw Error(`External navigation is not allowed`)}var Ie=[`POST`,`PUT`,`PATCH`,`DELETE`];new Set(Ie);var Le=[`GET`,...Ie];new Set(Le);var Re=[`about:`,`blob:`,`chrome:`,`chrome-untrusted:`,`content:`,`data:`,`devtools:`,`file:`,`filesystem:`,`javascript:`];function ze(e){try{return Re.includes(new URL(e).protocol)}catch{return!1}}var Be=_.createContext(null);Be.displayName=`DataRouter`;var Ve=_.createContext(null);Ve.displayName=`DataRouterState`;var He=_.createContext(!1);function Ue(){return _.useContext(He)}var We=_.createContext({isTransitioning:!1});We.displayName=`ViewTransition`;var Ge=_.createContext(new Map);Ge.displayName=`Fetchers`;var Ke=_.createContext(null);Ke.displayName=`Await`;var qe=_.createContext(null);qe.displayName=`Navigation`;var Je=_.createContext(null);Je.displayName=`Location`;var Ye=_.createContext({outlet:null,matches:[],isDataRoute:!1});Ye.displayName=`Route`;var Xe=_.createContext(null);Xe.displayName=`RouteError`;var Ze=`REACT_ROUTER_ERROR`,Qe=`REDIRECT`,$e=`ROUTE_ERROR_RESPONSE`;function et(e){if(e.startsWith(`${Ze}:${Qe}:{`))try{let t=JSON.parse(e.slice(28));if(typeof t==`object`&&t&&typeof t.status==`number`&&typeof t.statusText==`string`&&typeof t.location==`string`&&typeof t.reloadDocument==`boolean`&&typeof t.replace==`boolean`)return t}catch{}}function tt(e){if(e.startsWith(`${Ze}:${$e}:{`))try{let t=JSON.parse(e.slice(40));if(typeof t==`object`&&t&&typeof t.status==`number`&&typeof t.statusText==`string`)return new De(t.status,t.statusText,t.data)}catch{}}function nt(e,{relative:t}={}){w(rt(),`useHref() may be used only in the context of a <Router> component.`);let{basename:n,navigator:r}=_.useContext(qe),{hash:i,pathname:a,search:o}=ut(e,{relative:t}),s=a;return n!==`/`&&(s=a===`/`?n:Ce([n,a])),r.createHref({pathname:s,search:o,hash:i})}function rt(){return _.useContext(Je)!=null}function it(){return w(rt(),`useLocation() may be used only in the context of a <Router> component.`),_.useContext(Je).location}var at=`You should call navigate() in a React.useEffect(), not when your component is first rendered.`;function ot(e){_.useContext(qe).static||_.useLayoutEffect(e)}function st(){let{isDataRoute:e}=_.useContext(Ye);return e?Dt():ct()}function ct(){w(rt(),`useNavigate() may be used only in the context of a <Router> component.`);let e=_.useContext(Be),{basename:t,navigator:n}=_.useContext(qe),{matches:r}=_.useContext(Ye),{pathname:i}=it(),a=JSON.stringify(xe(r)),o=_.useRef(!1);return ot(()=>{o.current=!0}),_.useCallback((r,s={})=>{if(T(o.current,at),!o.current)return;if(typeof r==`number`){n.go(r);return}let c=Se(r,JSON.parse(a),i,s.relative===`path`);e==null&&t!==`/`&&(c.pathname=c.pathname===`/`?t:Ce([t,c.pathname])),Fe(typeof r==`string`?r:k(r),n.createHref(c),Ne(n),`reject`),(s.replace?n.replace:n.push)(c,s.state,s)},[t,n,a,i,e])}_.createContext(null);function lt(){let{matches:e}=_.useContext(Ye);return e[e.length-1]?.params??{}}function ut(e,{relative:t}={}){let{matches:n}=_.useContext(Ye),{pathname:r}=it(),i=JSON.stringify(xe(n));return _.useMemo(()=>Se(e,JSON.parse(i),r,t===`path`),[e,i,r,t])}function dt(e,t){return ft(e,t)}function ft(e,t,n){w(rt(),`useRoutes() may be used only in the context of a <Router> component.`);let{navigator:r}=_.useContext(qe),{matches:i}=_.useContext(Ye),a=i[i.length-1],o=a?a.params:{},s=a?a.pathname:`/`,c=a?a.pathnameBase:`/`,l=a&&a.route;{let e=l&&l.path||``;kt(s,!l||e.endsWith(`*`)||e.endsWith(`*?`),`You rendered descendant <Routes> (or called \`useRoutes()\`) at "${s}" (under <Route path="${e}">) but the parent route path has no trailing "*". This means if you navigate deeper, the parent won't match anymore and therefore the child routes will never render.
 
@@ -28,3 +688,6 @@ h_=AGConnected.Home;y_=AGConnected.Skills;w_=AGConnected.Skill;A_=AGConnected.Pr
 const AGOriginalApp=tv;
 tv=function(){return (0,Q.jsx)(AGConnected.Provider,{children:(0,Q.jsx)(AGOriginalApp,{})})};
 av(document.getElementById(`root`));
+
+}
+})();

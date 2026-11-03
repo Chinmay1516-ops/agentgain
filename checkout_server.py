@@ -23,6 +23,7 @@ async def checkout_config():
     return {'mode': 'PAYPAL_SANDBOX', 'models': settings['ALLOWED_OLLAMA_MODELS'],
             'min_eval_records': settings['MIN_EVAL_RECORDS'],
             'payments_enabled': bool(settings['PAYMENT_CONTROLLER_ENABLED']),
+            'oneintent_enabled': bool(settings['ONEINTENT_ENABLED']),
             'paypal_configured': bool(settings['PAYPAL_CLIENT_ID'] and settings['PAYPAL_SECRET'])}
 
 @app.get('/api/frontend-config')

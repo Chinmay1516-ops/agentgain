@@ -413,6 +413,44 @@ async def reserve_intent(
     }
 
 
+@router.get("")
+async def list_buyer_intents(
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role("buyer")),
+):
+    """Buyer-only metadata for OneIntent dashboard; no private skill contents."""
+    require_oneintent_enabled()
+    intents = (await db.execute(
+        select(PurchaseIntent)
+        .where(PurchaseIntent.buyer_id == user.id)
+        .order_by(PurchaseIntent.created_at.desc())
+        .limit(200)
+    )).scalars().all()
+    intent_ids = [row.id for row in intents]
+    linked_contracts = {}
+    if intent_ids:
+        linked_contracts = dict((await db.execute(
+            select(EvaluationContract.intent_id, EvaluationContract.id)
+            .where(EvaluationContract.buyer_id == user.id)
+            .where(EvaluationContract.intent_id.in_(intent_ids))
+        )).all())
+    return {"intents": [
+        {
+            "intent_id": row.id,
+            "request_id": row.request_id,
+            "requesting_agent_id": row.requesting_agent_id,
+            "purpose": row.purpose,
+            "scope_key": row.scope_key,
+            "scope_metadata_json": row.scope_metadata_json or {},
+            "status": row.status.value,
+            "decision": row.decision,
+            "overlap_review": row.overlap_results_json or {},
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "contract_id": linked_contracts.get(row.id),
+        } for row in intents
+    ]}
+
+
 @router.get("/{intent_id}")
 async def get_intent(
     intent_id: str,
