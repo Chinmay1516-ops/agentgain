@@ -16,7 +16,7 @@ function __renderSpecial(bodyHtml, cssText, pageTitle) {
   document.title = pageTitle;
   // The standalone console CSS does not mix with the original React style cascade.
   const originalStyle = document.getElementById('ag-original-styles');
-  originalStyle.disabled = Boolean(cssText);
+  if (originalStyle) originalStyle.disabled = Boolean(cssText);
   if (cssText) {
     const style = document.createElement('style');
     style.textContent = cssText;
@@ -655,7 +655,245 @@ function createConnectedScreens({React:R, Link, useNavigate, useLocation, sample
  function Register(){const app=useApp(),[busy,act]=useAction(),[draft,setDraft]=R.useState({...sampleSkill,tasks:'invoice_extraction'}),[registered,setRegistered]=R.useState(null);const change=key=>value=>setDraft(previous=>({...previous,[key]:value}));async function submit(e){e.preventDefault();await act(async()=>{let output;try{output=JSON.parse(draft.exampleOutput)}catch{throw Error('Public example output must be valid JSON.');}const payload={version:draft.version,title:draft.name,description:draft.description,instructions_md:draft.instructions,examples_json:[{input:{text:draft.exampleInput},output}],supported_tasks:draft.tasks.split(',').map(s=>s.trim()).filter(Boolean),price_usd:draft.price,currency:'USD',licence_terms:draft.licence,seller_eval_policy:{min_records:3,max_tokens_per_record:1500}};const r=await app.api('/api/skills/register',{role:'seller',body:payload});setRegistered(r);app.setIds({skillId:r.skill_id});app.setNotice('Skill version saved in PostgreSQL.');})}return h(Shell,{title:'Register a skill',seller:true},h('h1',null,'Give your skill a clear promise.'),h('form',{onSubmit:submit},card('Describe the skill',field('Name',draft.name,change('name'),'text',{required:true}),field('Description',draft.description,change('description'),'textarea',{required:true}),field('Supported task names (comma separated)',draft.tasks,change('tasks'),'text',{required:true})),card('Define the exact version',field('Version',draft.version,change('version'),'text',{required:true}),field('Skill instructions',draft.instructions,change('instructions'),'textarea',{required:true,maxLength:40000}),field('Public example input',draft.exampleInput,change('exampleInput'),'textarea',{required:true}),field('Public example output JSON',draft.exampleOutput,change('exampleOutput'),'textarea',{required:true})),card('Set the offer',field('Price (USD)',draft.price,change('price'),'number',{required:true,min:'0.01',step:'0.01'}),field('Licence terms',draft.licence,change('licence'),'textarea',{required:true}),h('p',null,'Published evaluation policy: at least 3 records and at most 1500 scored tokens per record. The server computes the package hash.'),button(busy?'Registering…':'Register this version',null,{type:'submit',disabled:busy||!!registered}))),registered&&card('Version registered on the backend',json(registered),h('p',null,'Buyer checkout link'),h('a',{href:'/buyer/skills/'+encodeURIComponent(registered.skill_id)},location.origin+'/buyer/skills/'+registered.skill_id),link('My listings','/seller')))}
  function Seller(){const app=useApp(),load=useLoad('/api/seller/skills','seller'),[selected,setSelected]=R.useState(''),[stats,setStats]=R.useState(null),[busy,act]=useAction();return h(Shell,{title:'Seller overview',seller:true},h('header',{className:'seller-hero ag-hero'},h('div',null,h('h1',null,'Your skills, ready to test.'),h('p',null,'Listings are stored on the backend. Demo evaluations and payment outcomes are shown separately.')),link('Register a skill','/seller/register')),card('My listings',button('Refresh listings',load.refresh,{variant:'outline'}),loaded(load,d=>d.skills.length?h('div',{className:'ag-list'},d.skills.map(s=>h('article',{key:s.skill_id},h('h3',null,s.title),h('p',null,s.description),h('p',null,s.version+' · USD '+s.price_usd),h('code',{className:'ag-code'},s.content_sha256),h('div',{className:'ag-actions'},link('Buyer view','/buyer/skills/'+encodeURIComponent(s.skill_id),'outline'),button('Copy checkout link',()=>act(async()=>{await navigator.clipboard.writeText(location.origin+'/buyer/skills/'+encodeURIComponent(s.skill_id));app.setNotice('Checkout link copied. Localhost links work on this computer.')}),{variant:'outline',disabled:busy}),button('View actual activity',()=>act(async()=>{const [funnel,outcomes,demo]=await Promise.all([app.api('/analytics/seller/'+encodeURIComponent(s.skill_id)+'/funnel',{role:'seller'}),app.api('/analytics/seller/'+encodeURIComponent(s.skill_id)+'/outcomes',{role:'seller'}),app.api('/api/seller/'+encodeURIComponent(s.skill_id)+'/demo-outcomes',{role:'seller'})]);setSelected(s.title);setStats({demo_evaluations:demo,payment_funnel:funnel,purchase_outcomes:outcomes})}),{disabled:busy}))))):h('p',null,'No seller listings yet. Register your first version.'))),stats&&card('Activity · '+selected,h('p',null,'Demo evaluations are not purchases or revenue. Buyer records and checked answers are private.'),json(stats)))}
  function Locked(){return h(Shell,{title:'Skill delivery'},card('Skill delivery is locked',h('p',null,'This local demo has not processed a payment or issued a licence. You can inspect evaluation metrics in the results screen.'),link('Evaluation history','/buyer#evaluations')))}
- return {Provider,Home,Skills,Skill,Prepare,Review,Progress:()=>h(RunView),Results:()=>h(RunView,{results:true}),Register,Seller,Locked};
+
+  // AgentGain premium connected screens. Uses existing Context, API wrapper, and React bundle.
+  // Landing page and all /assets references are intentionally untouched.
+  const P=h;
+  const pill=(value,tone='neutral')=>P('span',{className:'agp-pill agp-pill--'+tone},String(value??'—').replaceAll('_',' '));
+  const money=value=>value==null?'—':'US$'+Number(value).toFixed(2);
+  const mini=(title,value,note)=>P('div',{className:'agp-mini'},P('small',null,title),P('strong',null,value??'—'),note&&P('span',null,note));
+  const sheet=(title,...contents)=>P('section',{className:'agp-card'},title&&P('h2',null,title),...contents);
+  const goLink=(label,to,kind='primary')=>P(Link,{to,className:'agp-btn agp-btn--'+kind},label);
+  const goButton=(label,onClick,kind='primary',extra={})=>P('button',{type:'button',className:'agp-btn agp-btn--'+kind,onClick,...extra},label);
+  const description=(text)=>P('p',{className:'agp-muted'},text);
+  const fieldP=(label,value,onChange,props={})=>P('label',{className:'agp-field'},P('span',null,label),props.multiline?
+     P('textarea',{value,onChange:e=>onChange(e.target.value),rows:props.rows||5,placeholder:props.placeholder,required:props.required,...(props.maxLength?{maxLength:props.maxLength}:{})}):
+     P('input',{type:props.type||'text',value,onChange:e=>onChange(e.target.value),placeholder:props.placeholder,required:props.required,min:props.min,step:props.step,max:props.max}));
+  const safeFormat=v=>v==null?'—':String(v);
+  const isVerified=mode=>mode==='VERIFIED_WORK';
+  const skillImage=s=>/invoice|billing/i.test(s?.title||'')?'/assets/skill-invoice-FZf9-mXZ.png':/order|categor/i.test(s?.title||'')?'/assets/skill-orders-D8Qr1fQs.png':/return/i.test(s?.title||'')?'/assets/skill-returns-BFMl8fQx.png':'/assets/skill-attributes-DnCP938O.png';
+  const stages=['Discover','OneIntent','Configure','Contract','PayPal','Results'];
+  function PremiumShell({title,subtitle,stage,seller=false,children}) {
+    const app=useApp(),loc=useLocation();
+    const buyerNav=[['Overview','/buyer','⌂'],['Explore skills','/buyer/skills','⌕'],['Evaluations','/buyer/evaluations/review','▤'],['Agent purchases','/?view=oneintent','▣'],['My skills','/buyer/my-skills/invoice-field-extractor','◇']];
+    const sellerNav=[['Overview','/seller','⌂'],['Register skill','/seller/register','⊞'],['My listings','/seller','▤']];
+    const nav=seller?sellerNav:buyerNav;
+    return P('div',{className:'buyer-app agp-shell'},
+      P('aside',{className:'agp-sidebar'},P(Link,{to:'/',className:'agp-brand'},P('span',{className:'agp-logo'},'◢'), 'AgentGain'),P('div',{className:'agp-side-label'},seller?'SELLER WORKSPACE':'BUYER WORKSPACE'),
+        P('nav',null,nav.map(([label,to,ico])=>to.startsWith('/?')?P('a',{key:label,href:to,className:'agp-nav'+(loc.search.includes('oneintent')?' active':'')},P('span',null,ico),label):P(Link,{key:label,to,className:'agp-nav'+(loc.pathname===to?' active':'')},P('span',null,ico),label))),
+        P('div',{className:'agp-sidebar-bottom'},goButton('Connect demo access',app.openConnection,'quiet'),P(Link,{to:seller?'/buyer':'/seller',className:'agp-switch'},seller?'Switch to Buyer':'Switch to Seller'))),
+      P('div',{className:'agp-body'},P('header',{className:'agp-topbar'},P(Link,{to:'/'},'⌂'),P('span',null,'›'),P('strong',null,title),P('span',{className:'agp-spacer'}),P('span',{className:'agp-sandbox'},app.config.mode==='PAYPAL_SANDBOX'?'PayPal Sandbox':'Local evaluation'),goButton(app.tokens.buyer||app.tokens.seller?'Access ✓':'Connect',app.openConnection,'small')),
+        P('main',{className:'agp-main'},stage!=null&&!seller&&P('ol',{className:'agp-steps'},stages.map((s,i)=>P('li',{key:s,className:i===stage?'current':i<stage?'done':''},P('span',null,i<stage?'✓':String(i+1)),P('small',null,s)))),
+          P('div',{className:'agp-hero'},P('div',null,P('span',{className:'agp-eyebrow'},seller?'AGENTGAIN / SELLER':'AGENTGAIN / BUYER'),P('h1',null,title),subtitle&&P('p',null,subtitle))),
+          app.notice&&P('div',{role:'status',className:'agp-notice'},app.notice),
+          children,P('footer',{className:'agp-footer'},'AgentGain · Actual records from FastAPI and Neon · PayPal Sandbox only'))));
+  }
+  function PremiumHome(){
+    const app=useApp(),load=useLoad('/api/my/contracts'),[busy,act]=useAction();
+    const [task,setTask]=R.useState('invoice_extraction'),[prompt,setPrompt]=R.useState('Extract invoiceNumber, total, and currency. Return valid JSON.'),
+      [input,setInput]=R.useState('{"text":"Invoice INV-1042. Total USD 1250.00."}'),
+      [answer,setAnswer]=R.useState('{"invoiceNumber":"INV-1042","total":"1250.00","currency":"USD"}'),[result,setResult]=R.useState(null);
+    async function attempt(e){e.preventDefault();await act(async()=>{
+      const payload={task_type:task,model_name:app.config.models?.[0],system_prompt:prompt,raw_input_json:JSON.parse(input),expected_schema_json:invoiceSchema,expected_checked_answer:JSON.parse(answer)};
+      const response=await app.api('/api/buyer/attempt-task',{body:payload});setResult(response);
+    })}
+    const attempts=sheet('Optional · Identify a real agent problem',
+      description('Run an original task before browsing. The output and recommended skill come from Ollama and FastAPI; no scores are invented.'),
+      P('form',{className:'agp-form',onSubmit:attempt},
+        P('div',{className:'agp-fields'},fieldP('Task identifier',task,setTask,{required:true}),fieldP('Baseline agent system prompt',prompt,setPrompt,{required:true})),
+        P('div',{className:'agp-fields'},fieldP('Original task input (JSON)',input,setInput,{multiline:true,rows:4,required:true}),fieldP('Checked expected answer (JSON)',answer,setAnswer,{multiline:true,rows:4,required:true})),
+        goButton(busy?'Running model…':'Try original task',null,'secondary',{type:'submit',disabled:busy})),
+      result&&P('div',{className:'agp-info'},P('strong',null,result.task_passed?'Original task passed':'Original task failed verification'),
+        result.recorded_validation_error&&P('p',null,result.recorded_validation_error),
+        result.recommended_skill&&P(Link,{to:'/buyer/skills/'+encodeURIComponent(result.recommended_skill.skill_id),className:'agp-btn agp-btn--primary'},'View recommended skill →'),
+        P('details',null,P('summary',null,'Inspect real model result'),P('pre',{className:'agp-code'},JSON.stringify(result,null,2)))));
+    const history=sheet('Your actual evaluation history',goButton('Refresh',load.refresh,'small'),loaded(load,d=>(d.contracts||[]).length?
+       P('div',{className:'agp-list'},d.contracts.map(c=>P('article',{key:c.contract_id},P('div',null,P('h3',null,c.title||'Skill evaluation'),P('small',null,c.contract_id)),P('div',{className:'agp-status-row'},pill(c.status),pill(c.payment_state)),goButton('Open',()=>{app.setIds({contractId:c.contract_id,skillId:c.skill_id,runId:c.demo_run_id||null});location.assign('/buyer/evaluations/review')},'secondary')))):
+       description('No contract yet. Choose a skill and follow the purchase flow.')));
+    return P(PremiumShell,{title:'Buyer overview',subtitle:'Find what your agent needs, check the purchase intent, and pay only for verified value.'},
+      P('div',{className:'agp-tiles'},
+        P('div',{className:'agp-tile'},P('span',null,'01 / DISCOVER'),P('h3',null,'Choose an AI skill'),description('Explore the real marketplace or test an original task failure.'),goLink('Explore real skills →','/buyer/skills')),
+        P('div',{className:'agp-tile'},P('span',null,'02 / GUARD'),P('h3',null,'Avoid paying twice'),description('OneIntent checks independent agent purchase requests and asks for your decision.'),P('a',{className:'agp-btn agp-btn--secondary',href:'/?view=oneintent'},'Agent purchases →')),
+        P('div',{className:'agp-tile'},P('span',null,'03 / VERIFY'),P('h3',null,'Pay for results'),description('Choose a reusable skill or itemized Verified Work, with backend-controlled payment.'),goLink('View evaluations →','/buyer/evaluations/review','secondary'))),
+      attempts,history);
+  }
+  function PremiumSkills(){
+    const load=useLoad('/api/skills',null),[query,setQuery]=R.useState('');
+    return P(PremiumShell,{title:'Explore skills',subtitle:'Choose from real seller-registered skills. Prices and versions come from Neon.',stage:0},
+      P('div',{className:'agp-search'},P('span',null,'⌕'),P('input',{type:'search',value:query,onChange:e=>setQuery(e.target.value),placeholder:'What does your agent need to do?','aria-label':'Search skills'})),
+      loaded(load,d=>{const skills=(d.skills||[]).filter(s=>(s.title+' '+s.description+' '+(s.supported_tasks||[]).join(' ')).toLowerCase().includes(query.toLowerCase()));return skills.length?
+        P('div',{className:'agp-market'},skills.map((s,i)=>P('article',{key:s.skill_id,className:'agp-product'},P('div',{className:'agp-product-art'},P('img',{src:skillImage(s),alt:'',loading:'lazy'})),P('div',{className:'agp-product-info'},pill((s.supported_tasks||['AI skill'])[0]),P('h2',null,s.title),description(s.description),P('p',{className:'agp-small'},'Version '+s.version+' · Seller '+s.seller_id),P('div',{className:'agp-product-foot'},P('strong',null,money(s.price_usd)),goLink('View skill →','/buyer/skills/'+encodeURIComponent(s.skill_id),'secondary')))))):
+        sheet('No matching skills',description('No registered skill matches this search. Try another term.'));}));
+  }
+  function PremiumSkill(){
+    const app=useApp(),navigate=useNavigate(),id=decodeURIComponent(useLocation().pathname.split('/').pop()),load=useLoad('/api/checkout/'+encodeURIComponent(id),null);
+    const [mode,setMode]=R.useState(app.ids.skillId===id&&app.ids.purchaseMode||'FULL_SKILL');
+    const [agent,setAgent]=R.useState('assistant-a'),[purpose,setPurpose]=R.useState(''),[scope,setScope]=R.useState(''),[recipient,setRecipient]=R.useState('');
+    const [intent,setIntent]=R.useState(null),[candidates,setCandidates]=R.useState([]),[busy,act]=useAction();
+    async function start(s){await act(async()=>{
+      if(!app.config.mode)throw Error('Backend configuration is still loading. Please try again shortly.');
+      app.setIds({skillId:id,purchaseMode:mode,intentId:null,datasetId:null,contractId:null,runId:null});
+      if(!app.config.oneintent_enabled){navigate('/buyer/evaluations/new');return;}
+      if(!purpose.trim()||!scope.trim())throw Error('Describe the purchase purpose and a stable batch/project scope.');
+      const created=await app.api('/intents',{body:{request_id:'req-'+crypto.randomUUID(),requesting_agent_id:agent.trim(),purpose:purpose.trim(),scope_key:scope.trim(),scope_metadata_json:{recipient:recipient.trim(),skill_id:id,task_type:'agent_skill_purchase',purchase_mode:mode}}});
+      const checked=await app.api('/intents/'+encodeURIComponent(created.intent_id)+'/check',{body:{}});
+      setIntent({id:created.intent_id,overlaps:checked.overlaps||[],stage:'review'});
+      try{const result=await app.api('/intents');setCandidates(result.intents||[])}catch{setCandidates([])}
+    })}
+    async function decide(action,other){await act(async()=>{
+      const result=await app.api('/intents/'+encodeURIComponent(intent.id)+'/resolve',{body:{action,...(other?{existing_intent_id:other}:{})}});
+      if(['PROCEED','BUY_BOTH'].includes(action)&&result.status==='CLEARED'){
+        app.setIds({skillId:id,purchaseMode:mode,intentId:intent.id,datasetId:null,contractId:null,runId:null});navigate('/buyer/evaluations/new');
+      }else{setIntent({...intent,stage:'closed',decision:action});app.setNotice('OneIntent decision recorded. No new checkout was started.');}
+    })}
+    return P(PremiumShell,{title:'Skill details',subtitle:'Review the skill, choose how to pay, then verify that your purchase intent is not redundant.',stage:0},
+      loaded(load,s=>{const unit=s.seller_eval_policy?.verified_work_unit_price_usd;return P(R.Fragment,null,
+        P('div',{className:'agp-detail'},sheet(null,P('div',{className:'agp-art-big'},P('img',{src:skillImage(s),alt:''})),P('h2',null,s.title),description(s.description),P('div',{className:'agp-metas'},pill('Version '+s.version),pill('Seller '+s.seller_id),pill('SHA-256 version protected')),
+          P('p',{className:'agp-muted agp-small'},'Supported tasks: '+(s.supported_tasks||[]).join(', ')),P('details',null,P('summary',null,'Seller policy and licence'),P('pre',{className:'agp-code'},JSON.stringify({seller_eval_policy:s.seller_eval_policy,licence_terms:s.licence_terms,content_sha256:s.content_sha256},null,2)))),
+          sheet('Choose your purchase model',P('div',{className:'agp-mode-grid'},
+            P('label',{className:'agp-mode'+(!isVerified(mode)?' selected':'')},P('input',{type:'radio',name:'agp-mode',checked:!isVerified(mode),onChange:()=>{setMode('FULL_SKILL');setIntent(null)}}),P('strong',null,'Buy the reusable skill'),P('span',null,money(s.price_usd)+' if evaluation passes'),P('small',null,'FULL_SKILL · Tested version and licence delivered after successful capture')),
+            P('label',{className:'agp-mode'+(isVerified(mode)?' selected':'')+(!unit?' unavailable':'')},P('input',{type:'radio',name:'agp-mode',checked:isVerified(mode),disabled:!unit,onChange:()=>{setMode('VERIFIED_WORK');setIntent(null)}}),P('strong',null,'Pay per accepted output'),P('span',null,unit?money(unit)+' per accepted record':'Not offered by this seller'),P('small',null,'VERIFIED_WORK · Accepted outputs only, no reusable skill licence')))),
+          !intent?P('form',{className:'agp-form',onSubmit:e=>{e.preventDefault();start(s)}},P('h3',null,app.config.oneintent_enabled?'OneIntent · Check this purchase':'Prepare the evaluation'),description('Identify the actual business need. OneIntent does not make a buying decision automatically.'),P('div',{className:'agp-fields'},fieldP('Requesting agent',agent,setAgent,{required:true}),fieldP('Project or batch scope',scope,setScope,{placeholder:'e.g. nov-01-company-a',required:true}),fieldP('Purchase purpose',purpose,setPurpose,{placeholder:'What problem is this skill for?',required:true}),fieldP('Recipient / team',recipient,setRecipient)),goButton(busy?'Checking…':app.config.oneintent_enabled?'Check OneIntent →':'Continue to evaluation →',null,'primary',{type:'submit',disabled:busy})):P('div',{className:'agp-review-intent'},P('h3',null,'OneIntent purchase check'),pill(intent.stage==='closed'?'CANCELLED':'REVIEWED'),P('p',{className:'agp-small'},'Intent '+intent.id),intent.overlaps.length?
+            P(R.Fragment,null,description('Potential overlaps were reported. Compare before making an explicit decision.'),P('div',{className:'agp-list'},intent.overlaps.map(m=>P('article',{key:m.intent_id},P('div',null,P('strong',null,candidates.find(c=>c.intent_id===m.intent_id)?.purpose||m.intent_id),P('p',{className:'agp-small'},m.reason||'Potential overlap')),pill(candidates.find(c=>c.intent_id===m.intent_id)?.status||'REVIEW')))),
+              intent.stage!=='closed'&&P('div',{className:'agp-actions'},goButton('Buy both intentionally',()=>decide('BUY_BOTH'),'primary',{disabled:busy}),goButton('Cancel new request',()=>decide('CANCEL_NEW'),'secondary',{disabled:busy}),...(candidates.filter(c=>intent.overlaps.some(m=>m.intent_id===c.intent_id)&&['RESERVED','COMPLETED'].includes(c.status)).map(c=>goButton('Continue '+c.requesting_agent_id,()=>decide('CONTINUE_EXISTING',c.intent_id),'secondary',{disabled:busy}))))):P(R.Fragment,null,description('No overlap reported. The backend still requires an explicit buyer clearance.'),intent.stage!=='closed'&&goButton('Approve this purchase purpose →',()=>decide('PROCEED'),'primary',{disabled:busy}))),
+          P('a',{href:'/?view=oneintent',className:'agp-inline-link'},'Open AG Grid Agent Purchases dashboard →')));
+      }));
+  }
+  function PremiumPrepare(){
+    const app=useApp(),navigate=useNavigate(),[busy,act]=useAction(),[skill,setSkill]=R.useState(app.ids.skillId||''),[mode,setMode]=R.useState(app.ids.purchaseMode||'FULL_SKILL');
+    const [model,setModel]=R.useState(''),[records,setRecords]=R.useState(JSON.stringify(sampleDataset.records,null,2)),[schema,setSchema]=R.useState(JSON.stringify(invoiceSchema,null,2)),[prompt,setPrompt]=R.useState('Extract invoiceNumber, total and currency from the provided invoice text. Return total as a decimal string with two places. Return only JSON.');
+    const [accuracy,setAccuracy]=R.useState('90'),[lift,setLift]=R.useState('20'),[significance,setSignificance]=R.useState(true);
+    const skills=useLoad('/api/skills',null);const selected=(skills.data?.skills||[]).find(s=>s.skill_id===skill),unit=selected?.seller_eval_policy?.verified_work_unit_price_usd;
+    async function submit(e){e.preventDefault();await act(async()=>{
+      if(!skill)throw Error('Choose a skill.');if(isVerified(mode)&&!unit)throw Error('The seller has not published a Verified Work unit price for this skill.');
+      if(app.config.oneintent_enabled&&!app.ids.intentId)throw Error('OneIntent is enabled. Return to Skill details and clear your purchase purpose before creating a contract.');
+      const raw=JSON.parse(records),rows=Array.isArray(raw)?raw:raw.records_json;
+      if(!Array.isArray(rows))throw Error('Evaluation records must be a JSON array.');
+      const mapped=rows.map((r,i)=>{const input=typeof r.input==='string'?{text:r.input}:r.input;const answer=r.checked_answer||r.expected;if(!input||typeof input!=='object'||!answer||typeof answer!=='object')throw Error('Record '+(i+1)+' must contain input and checked_answer/expected.');return{input,checked_answer:answer}});
+      const ds=await app.api('/api/datasets/prepare',{body:{records_json:mapped,output_schema_json:JSON.parse(schema),baseline_agent_config:{system_prompt:prompt}}});
+      const caps=Math.min(1500,Number(selected?.seller_eval_policy?.max_tokens_per_record||1500));
+      const body={skill_id:skill,dataset_id:ds.dataset_id,model_name:model||app.config.models[0],purchase_mode:mode, ...(app.config.oneintent_enabled?{intent_id:app.ids.intentId}:{}),failure_policy:{max_technical_retries:0}};
+      if(isVerified(mode))body.verified_work_rules={min_records:Math.max(3,Number(app.config.min_eval_records||3)),max_tokens_per_record:caps};
+      else body.evaluation_rules={min_records:Math.max(3,Number(app.config.min_eval_records||3)),min_lift_pct:Number(lift),min_skilled_accuracy_pct:Number(accuracy),max_regressions:0,max_tokens_per_record:caps,require_significance:significance,significance_alpha:0.05};
+      const contract=await app.api('/contracts/',{body});
+      app.setIds({skillId:skill,purchaseMode:mode,datasetId:ds.dataset_id,contractId:contract.contract_id,runId:null});navigate('/buyer/evaluations/review');
+    })}
+    return P(PremiumShell,{title:'Prepare evaluation',subtitle:'Use independently checked records. No payment happens during preparation.',stage:2},
+      P('form',{onSubmit:submit,className:'agp-form'},sheet('1 · Purchase configuration',
+        loaded(skills,d=>P('label',{className:'agp-field'},P('span',null,'Registered skill'),P('select',{required:true,value:skill,onChange:e=>{setSkill(e.target.value);app.setIds({skillId:e.target.value})}},P('option',{value:''},'Choose skill'),d.skills.map(s=>P('option',{key:s.skill_id,value:s.skill_id},s.title+' · '+s.version))))),
+        P('div',{className:'agp-fields'},P('label',{className:'agp-field'},P('span',null,'Purchase mode'),P('select',{value:mode,onChange:e=>{setMode(e.target.value);app.setIds({purchaseMode:e.target.value})}},P('option',{value:'FULL_SKILL'},'FULL_SKILL — reusable skill'),P('option',{value:'VERIFIED_WORK',disabled:!unit},'VERIFIED_WORK — accepted outputs'))),P('label',{className:'agp-field'},P('span',null,'Evaluation model'),P('select',{value:model||app.config.models?.[0]||'',onChange:e=>setModel(e.target.value)},(app.config.models||[]).map(m=>P('option',{key:m,value:m},m))))),
+        isVerified(mode)&&P('div',{className:'agp-info'},unit?money(unit)+' per accepted record. Maximum authorization and exact terms will be set by the backend after you submit the dataset.':'This skill does not offer per-record pricing. Select FULL_SKILL or another eligible skill.'),
+        app.config.oneintent_enabled&&P('p',{className:'agp-small'},'Cleared OneIntent ID: '+(app.ids.intentId||'Missing — return to skill details'))),
+        sheet('2 · Checked evaluation dataset',description('Use records appropriate to this skill; the default invoice records are only an example. The seller skill instructions are not treated as ground truth.'),
+          selected&&!/invoice/i.test(selected.title)&&P('div',{className:'agp-info'},'This is not an invoice skill. Replace the example dataset, baseline prompt, output schema, and checked answers with records for '+selected.title+'.'),
+          P('label',{className:'agp-field'},P('span',null,'Upload JSON dataset (optional)'),P('input',{type:'file',accept:'.json,application/json',onChange:e=>{const file=e.target.files?.[0];if(file)act(async()=>{if(file.size>5_000_000)throw Error('File exceeds 5 MB.');const text=await file.text();JSON.parse(text);setRecords(text)})}})),
+          fieldP('Baseline prompt',prompt,setPrompt,{multiline:true,rows:3,required:true}),fieldP('Evaluation records JSON',records,setRecords,{multiline:true,rows:11,required:true}),fieldP('Expected output JSON Schema',schema,setSchema,{multiline:true,rows:7,required:true})),
+        !isVerified(mode)&&sheet('3 · Agreed full-skill success criteria',P('div',{className:'agp-fields'},fieldP('Minimum skilled accuracy %',accuracy,setAccuracy,{type:'number',min:0,max:100,required:true}),fieldP('Minimum improvement (percentage points)',lift,setLift,{type:'number',min:0,max:100,required:true})),P('label',{className:'agp-checkbox'},P('input',{type:'checkbox',checked:significance,onChange:e=>setSignificance(e.target.checked)}),'Require statistical significance'),description('The backend checks accuracy, regressions, the token cap, and your frozen evaluation rules.')),
+        sheet(null,goButton(busy?'Preparing…':'Create draft contract →',null,'primary',{type:'submit',disabled:busy||!skill||(isVerified(mode)&&!unit)}))));
+  }
+  function PremiumReview(){
+    const app=useApp(),navigate=useNavigate(),[busy,act]=useAction(),[consent,setConsent]=R.useState(false),[resume,setResume]=R.useState(app.ids.contractId||'');
+    const load=useLoad('/contracts/'+encodeURIComponent(app.ids.contractId||'missing'));
+    function renderContract(c){
+      const work=isVerified(c.terms?.purchase_mode);
+      const summary=sheet('Frozen commercial terms',
+        P('div',{className:'agp-facts'},
+          mini('Purchase mode',c.terms?.purchase_mode||'FULL_SKILL'),mini('Authorized amount',money(c.terms?.price)),mini('Contract status',c.status),mini('Evaluation model',c.terms?.model_name),
+          work&&mini('Price / accepted record',money(c.terms?.unit_price_usd)),work&&mini('Maximum billable records',c.terms?.max_billable_records)),
+        P('div',{className:'agp-kv'},P('span',null,'Contract ID'),P('code',null,c.contract_id),P('span',null,'Skill version'),P('strong',null,c.terms?.skill_version),P('span',null,'Purchase purpose'),P('strong',null,c.terms?.intent_purpose||'Not supplied'),P('span',null,'Terms hash'),P('code',null,c.terms_hash)),
+        P('details',null,P('summary',null,'Inspect exact frozen technical terms'),P('pre',{className:'agp-code'},JSON.stringify(c.terms,null,2))),
+        c.status==='DRAFT'&&P('div',{className:'agp-approval'},
+          P('label',{className:'agp-checkbox'},P('input',{type:'checkbox',checked:consent,onChange:e=>setConsent(e.target.checked)}),'I have reviewed and approve these exact displayed terms.'),
+          goButton(busy?'Approving…':'Approve terms →',()=>act(async()=>{await app.api('/contracts/'+encodeURIComponent(c.contract_id)+'/approve',{body:{contract_version:c.contract_version,terms_hash:c.terms_hash}});setConsent(false);load.refresh()}),'primary',{disabled:busy||!consent}))
+      );
+      if(c.status==='DRAFT')return summary;
+      const actions=P('div',{className:'agp-actions'},
+        goButton('View payment and results →',()=>navigate('/buyer/evaluations/results'),'secondary'),
+        c.payment_state==='UNINITIALIZED'&&goButton('Run unpaid demo instead',()=>act(async()=>{const d=await app.api('/demo/contracts/'+encodeURIComponent(c.contract_id)+'/run',{body:{}});app.setIds({runId:d.run_id});navigate('/buyer/evaluations/progress')}),'secondary',{disabled:busy}));
+      return P(R.Fragment,null,summary,
+        P('div',{className:'agp-info'},'PayPal authorizes first. The server evaluates and decides capture/void. No frontend calculation can mark payment complete.'),
+        app.config.mode==='PAYPAL_SANDBOX'&&P('div',{className:'agp-payment'},P(PaymentPanel,{key:c.contract_id,contract:c})),actions);
+    }
+    const open=P('div',{className:'agp-actions'},P('input',{className:'agp-input',placeholder:'contract_...',value:resume,onChange:e=>setResume(e.target.value)}),goButton('Load contract',()=>{app.setIds({contractId:resume.trim(),runId:null});setConsent(false)},'secondary'));
+    return P(PremiumShell,{title:'Review contract',subtitle:'Confirm the exact price or maximum authorization, evaluation rules, and purchase purpose.',stage:3},
+      sheet('Open an existing contract',open),
+      !app.ids.contractId?sheet('No contract selected',description('Prepare a dataset to generate a contract.'),goLink('Prepare evaluation →','/buyer/evaluations/new')):loaded(load,renderContract));
+  }
+  function PremiumOutcome({results=false}){
+    const app=useApp();
+    const [data,setData]=R.useState(null),[error,setError]=R.useState(''),[revision,refresh]=R.useReducer(n=>n+1,0),[receipt,setReceipt]=R.useState(null),[auto,setAuto]=R.useState(true);
+    const contractId=app.ids.contractId;
+    R.useEffect(()=>{
+      if(!contractId||!app.tokens.buyer)return;
+      let live=true,timer;
+      async function load(){try{
+        const [c,s,e]=await Promise.all([app.api('/contracts/'+encodeURIComponent(contractId)),app.api('/payments/'+encodeURIComponent(contractId)+'/status'),app.api('/analytics/contracts/'+encodeURIComponent(contractId)+'/evidence')]);
+        if(!live)return;
+        setData({contract:c,status:s,evidence:e});setError('');
+        if(auto&&!['CAPTURE_COMPLETED','VOIDED','PAYMENT_ERROR'].includes(s.payment_state))timer=setTimeout(load,4500);
+      }catch(err){if(live)setError(err.message)}}
+      load();return()=>{live=false;clearTimeout(timer)};
+    },[contractId,app.tokens.buyer,revision,auto]);
+    if(app.ids.runId)return P(RunView,{results});
+    function liveContent(){
+      if(!contractId)return sheet('No contract selected',description('Open a contract from your buyer overview.'),goLink('Buyer overview →','/buyer'));
+      if(!app.tokens.buyer)return sheet('Buyer access required',description('Connect your buyer demo token to inspect your results.'),goButton('Connect demo access',app.openConnection));
+      if(error)return sheet('Unable to load evidence',P('p',{className:'agp-error'},error),goButton('Try again',refresh,'secondary'));
+      if(!data)return sheet('Loading',description('Reading contract, payment and evaluation evidence from FastAPI…'));
+      const ev=data.evidence,st=data.status,work=isVerified(ev.purchase_mode);
+      const stats=work?sheet('Verified Work · Actual itemized settlement',P('div',{className:'agp-facts'},
+        mini('Maximum authorized',money(ev.authorized_maximum_usd)),mini('Accepted records',ev.accepted_record_count??'Pending'),mini('Payable from verification',money(ev.payable_amount_usd))),
+        description('Only accepted outputs are eligible for delivery after confirmed capture. Rejected outputs remain locked.')):
+        sheet('Full Skill · Actual improvement evidence',P('div',{className:'agp-facts'},
+          mini('Baseline accuracy',ev.baseline_accuracy_pct==null?'Pending':ev.baseline_accuracy_pct+'%'),mini('With skill',ev.skilled_accuracy_pct==null?'Pending':ev.skilled_accuracy_pct+'%'),mini('Net lift',ev.net_lift_pct==null?'Pending':ev.net_lift_pct+' pp'),mini('Regressions',ev.regressions_count??'Pending')));
+      const headings=['Record','Baseline','With skill','Comparison','Tokens','Time (ms)','Output access'];
+      const rows=(ev.ag_grid_rows||[]).map(r=>P('tr',{key:r.record_index},
+        P('td',null,r.record_index),P('td',null,r.baseline_passed==null?'—':r.baseline_passed?'PASS':'FAIL'),
+        P('td',null,r.skilled_passed==null?'—':r.skilled_passed?'PASS':'FAIL'),P('td',null,r.comparison_status||'—'),
+        P('td',null,r.skilled_tokens??'—'),P('td',null,r.skilled_ms??'—'),P('td',null,r.skilled_output==null?'Locked / unavailable':'Available after capture')));
+      const evidence=sheet('Recorded per-record evidence',
+        P('div',{className:'agp-table-wrap'},P('table',{className:'agp-table'},
+          P('thead',null,P('tr',null,headings.map(x=>P('th',{key:x},x)))),P('tbody',null,rows))),
+        P('p',{className:'agp-small'},'Backend redacts private skilled outputs before confirmed capture.'));
+      const canDeliver=st.payment_state==='CAPTURE_COMPLETED'&&st.eval_verdict==='PASS';
+      const download=()=>{const blob=new Blob([JSON.stringify(receipt,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='AgentGain-'+contractId+'-receipt.json';a.click();URL.revokeObjectURL(url)};
+      const actions=P('div',{className:'agp-actions'},goButton('Refresh evidence',refresh,'secondary'),goButton(auto?'Stop live updates':'Watch live status',()=>setAuto(v=>!v),'secondary'),goLink('Back to contract','/buyer/evaluations/review','secondary'),
+        canDeliver&&goButton('Get verified delivery',()=>app.api('/payments/'+encodeURIComponent(contractId)+'/receipt').then(setReceipt).catch(err=>setError(err.message))));
+      const delivery=sheet('Settlement and delivery',actions,
+        receipt&&P('div',{className:'agp-info'},work?'Accepted work delivered; the reusable skill is not included.':'Paid reusable skill delivered.'),
+        receipt&&P('pre',{className:'agp-code'},JSON.stringify(receipt,null,2)),receipt&&goButton('Download verified receipt JSON',download,'secondary'));
+      return P(R.Fragment,null,P('div',{className:'agp-metrics'},mini('Payment state',st.payment_state),mini('Evaluation verdict',st.eval_verdict),mini('Purchase mode',ev.purchase_mode),mini('Rows evaluated',ev.ag_grid_rows?.length||0)),stats,evidence,ev.verdict_reason&&P('div',{className:'agp-info'},ev.verdict_reason),delivery);
+    }
+    return P(PremiumShell,{title:'Evaluation and payment results',subtitle:'Live evidence from the model worker and the PayPal payment controller.',stage:5},liveContent());
+  }
+  function PremiumRegister(){
+    const app=useApp(),[busy,act]=useAction(),[draft,setDraft]=R.useState({...sampleSkill,tasks:'invoice_extraction'}),[unit,setUnit]=R.useState('4.00'),[offerWork,setOfferWork]=R.useState(true),[registered,setRegistered]=R.useState(null);
+    const change=key=>value=>setDraft(v=>({...v,[key]:value}));
+    async function submit(e){e.preventDefault();await act(async()=>{const output=JSON.parse(draft.exampleOutput);const payload={version:draft.version,title:draft.name,description:draft.description,instructions_md:draft.instructions,examples_json:[{input:{text:draft.exampleInput},output}],supported_tasks:draft.tasks.split(',').map(x=>x.trim()).filter(Boolean),price_usd:draft.price,currency:'USD',licence_terms:draft.licence,seller_eval_policy:{min_records:3,max_tokens_per_record:1500,...(offerWork?{verified_work_unit_price_usd:unit}:{})}};
+      const r=await app.api('/api/skills/register',{role:'seller',body:payload});setRegistered(r);app.setNotice('The backend registered this skill and computed its content fingerprint.');
+    })}
+    return P(PremiumShell,{title:'Register an AI skill',subtitle:'Publish the skill once with a stable version, instructions and transparent purchase pricing.',seller:true},
+      P('form',{onSubmit:submit,className:'agp-form'},sheet('Skill identity',P('div',{className:'agp-fields'},fieldP('Skill name',draft.name,change('name'),{required:true}),fieldP('Version',draft.version,change('version'),{required:true})),fieldP('Description',draft.description,change('description'),{multiline:true,rows:3,required:true}),fieldP('Supported task identifiers (comma separated)',draft.tasks,change('tasks'),{required:true})),
+       sheet('Instructions and public examples',fieldP('Skill instructions',draft.instructions,change('instructions'),{multiline:true,rows:6,required:true,maxLength:40000}),P('div',{className:'agp-fields'},fieldP('Public input example',draft.exampleInput,change('exampleInput'),{multiline:true,rows:4,required:true}),fieldP('Public output JSON example',draft.exampleOutput,change('exampleOutput'),{multiline:true,rows:4,required:true}))),
+       sheet('Selling options',P('div',{className:'agp-fields'},fieldP('Reusable skill licence (USD)',draft.price,change('price'),{type:'number',min:0.01,step:0.01,required:true}),P('label',{className:'agp-checkbox'},P('input',{type:'checkbox',checked:offerWork,onChange:e=>setOfferWork(e.target.checked)}),'Also offer pay-per-accepted-record (Verified Work)')),offerWork&&fieldP('Verified Work · USD per accepted record',unit,setUnit,{type:'number',min:0.01,step:0.01,required:true}),fieldP('Licence terms',draft.licence,change('licence'),{multiline:true,rows:3,required:true}),description('The backend validates the pricing policy and rejects duplicate identical skill versions.')),
+       sheet(null,goButton(busy?'Registering…':'Register this skill version →',null,'primary',{type:'submit',disabled:busy||!!registered}),registered&&P('div',{className:'agp-info'},'Registered skill ID: '+registered.skill_id+' · SHA-256: '+registered.content_sha256),registered&&P(Link,{className:'agp-inline-link',to:'/buyer/skills/'+encodeURIComponent(registered.skill_id)},'Open real buyer listing →'))));
+  }
+  function PremiumSeller(){
+    const app=useApp(),load=useLoad('/api/seller/skills','seller'),[activity,setActivity]=R.useState(null),[selected,setSelected]=R.useState(''),[busy,act]=useAction();
+    return P(PremiumShell,{title:'Seller workspace',subtitle:'Publish capabilities and see the actual evaluation, conversion and payment outcomes.',seller:true},
+      P('div',{className:'agp-actions'},goLink('+ Register a new skill','/seller/register')),
+      sheet('Your registered skill versions',goButton('Refresh listings',load.refresh,'secondary'),loaded(load,d=>(d.skills||[]).length?
+        P('div',{className:'agp-list'},d.skills.map(s=>P('article',{key:s.skill_id},P('div',null,P('h3',null,s.title),P('small',null,s.version+' · '+money(s.price_usd)),P('p',{className:'agp-small'},s.description),s.seller_eval_policy?.verified_work_unit_price_usd&&pill(money(s.seller_eval_policy.verified_work_unit_price_usd)+'/accepted record')),
+          P('div',{className:'agp-actions'},goLink('Buyer listing','/buyer/skills/'+encodeURIComponent(s.skill_id),'secondary'),goButton('Real activity',()=>act(async()=>{const [f,o,d]=await Promise.all([app.api('/analytics/seller/'+encodeURIComponent(s.skill_id)+'/funnel',{role:'seller'}),app.api('/analytics/seller/'+encodeURIComponent(s.skill_id)+'/outcomes',{role:'seller'}),app.api('/api/seller/'+encodeURIComponent(s.skill_id)+'/demo-outcomes',{role:'seller'})]);setSelected(s.title);setActivity({funnel:f,outcomes:o,demo:d})}),'secondary',{disabled:busy}))))) :description('No listings yet. Register your first skill.')),
+      activity&&sheet('Actual outcomes · '+selected,description('Only server-recorded metrics are shown; unpaid evaluations are not revenue.'),P('details',{open:true},P('summary',null,'Seller funnel, payment outcomes and demo evaluations'),P('pre',{className:'agp-code'},JSON.stringify(activity,null,2))))));
+  }
+  function PremiumMySkills(){const app=useApp(),load=useLoad('/api/my/contracts');return P(PremiumShell,{title:'My verified purchases',subtitle:'Confirmed paid purchases may unlock a reusable skill or accepted work outputs, depending on the frozen purchase mode.'},
+    loaded(load,d=>sheet('Paid purchase records',...[(d.contracts||[]).filter(c=>c.payment_state==='CAPTURE_COMPLETED').length?
+      P('div',{className:'agp-list'},(d.contracts||[]).filter(c=>c.payment_state==='CAPTURE_COMPLETED').map(c=>P('article',{key:c.contract_id},P('div',null,P('h3',null,c.title),P('small',null,c.contract_id)),goButton('View receipt',()=>{app.setIds({contractId:c.contract_id,runId:null});location.assign('/buyer/evaluations/results')},'secondary')))):
+      description('No confirmed captured purchases are listed for this buyer.')])));
+  }
+
+ return {Provider,Home:PremiumHome,Skills:PremiumSkills,Skill:PremiumSkill,Prepare:PremiumPrepare,Review:PremiumReview,Progress:()=>h(PremiumOutcome,{results:false}),Results:()=>h(PremiumOutcome,{results:true}),Register:PremiumRegister,Seller:PremiumSeller,Locked:PremiumMySkills};
 }
 
 
