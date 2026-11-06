@@ -1,9 +1,11 @@
 import json
 import os
+import re
 import httpx
 from dotenv import load_dotenv
 
 load_dotenv()
+
 
 class IntentAgentError(Exception):
     pass
@@ -48,6 +50,20 @@ def intent_metadata(intent):
     }
 
 
+def _parse_agent_json(raw_text: str) -> dict:
+    """Parse JSON from agent message, stripping markdown fences if present."""
+    cleaned = raw_text.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned, flags=re.DOTALL).strip()
+    try:
+        return json.loads(cleaned)
+    except ValueError:
+        match = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
+        if match:
+            return json.loads(match.group(0))
+        raise
+
+
 async def index_intent(intent):
     """Save purchase metadata in the configured Elastic index."""
 
@@ -77,7 +93,11 @@ async def index_intent(intent):
             ) from exc
 
 
-async def search_similar_intents(buyer_id: str,purpose: str,scope_key: str,) -> list[str]:
+async def search_similar_intents(
+    buyer_id: str,
+    purpose: str,
+    scope_key: str,
+) -> list[str]:
     """Search only the current buyer's indexed purchases."""
 
     settings = get_elastic_settings()
@@ -191,7 +211,8 @@ async def review_purchase_overlap(intent, candidates: list) -> list[dict]:
                     "Elastic agent requires manual confirmation"
                 )
 
-            result = json.loads(data["response"]["message"])
+            message_text = data.get("response", {}).get("message", "")
+            result = _parse_agent_json(message_text)
             overlaps = result["overlaps"]
 
             if not isinstance(overlaps, list):
@@ -209,11 +230,9 @@ async def review_purchase_overlap(intent, candidates: list) -> list[dict]:
             ][:25]
 
         except (httpx.HTTPError, KeyError, ValueError, TypeError) as exc:
-            detail = type(exc).__name__
-
-    if isinstance(exc, httpx.HTTPStatusError):
-        detail += f" (HTTP {exc.response.status_code})"
-
-    raise IntentAgentError(
-        f"Elastic agent review failed: {detail}"
-    ) from exc
+            detail = f"{type(exc).__name__}: {exc}"
+            if isinstance(exc, httpx.HTTPStatusError):
+                detail = f"HTTP {exc.response.status_code} ({exc.response.text[:200]})"
+            raise IntentAgentError(
+                f"Elastic agent review failed: {detail}"
+            ) from exc
