@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#c7e7fc" />
-    <meta name="description" content="AgentGain marketplace compares baseline versus skilled AI on checked test cases and supports conditional PayPal Sandbox payment and OneIntent purchase controls." />
+    <meta name="description" content="AgentGain registers AI skills and compares baseline and skilled local model runs. Local demo — no payment processed." />
     <title>AgentGain — Better skills. Proven before you pay.</title>
     <link rel="icon" type="image/svg+xml" href="/assets/favicon-BzRlZ162.svg" />
     <link rel="preload" as="image" href="/assets/frame_0001-DKMEZCR3.webp" />
@@ -279,69 +279,6 @@ SOFTWARE.
 @media(max-width:800px){.agp-sidebar-bottom{display:flex;flex-wrap:wrap;margin-top:10px;padding:12px 0 0}.agp-home-link{width:100%;padding:10px 14px}.agp-brand-mark{width:33px;height:33px}.agp-card{padding:22px}.agp-hero{padding:22px}.agp-product{padding:17px;gap:12px}.agp-field input,.agp-field select,.agp-field textarea{font-size:16px}.agp-sidebar{min-height:auto}.agp-steps li small{font-size:12px}}
 @media(max-width:540px){.agp-card{padding:18px}.agp-list article{padding:16px}.agp-product{grid-template-columns:1fr}.agp-product-art{min-height:170px}.agp-facts,.agp-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(prefers-reduced-motion:reduce){.agp-shell *{animation:none!important;transition:none!important}}
-
-
-/* AgentGain final two-flow frontend refinement — symbol-only brand on all rendered pages. */
-.agp-brand,.agp-oneintent-brand,.cinematic-landing .agc-brand,.buyer-brand{display:inline-flex;align-items:center!important;justify-content:flex-start;gap:0!important;text-decoration:none}
-.agp-brand-mark,.agp-oneintent-brand .agp-brand-mark,.buyer-brand svg,.cinematic-landing .agc-brand svg{display:block!important;width:32px!important;height:32px!important;min-width:32px!important;min-height:32px!important;flex:0 0 32px!important;filter:none!important;object-fit:contain}
-.agp-brand>span,.agp-oneintent-brand>span,.buyer-brand>span,.cinematic-landing .agc-brand>span{display:none!important}
-.agp-brand{margin:0 8px 16px!important;padding:3px 5px!important;width:46px}
-.agp-oneintent-brand{margin-left:12px!important;width:46px!important}
-.cinematic-landing .agc-brand{min-width:34px;line-height:1!important}
-.cinematic-landing .agc-brand-dot{display:none!important}
-.agp-test-explainer{padding:20px 21px;margin:20px 0;border:1px solid #c9e0f6;border-radius:15px;background:linear-gradient(130deg,#f4faff,#edf5ff)}
-.agp-test-explainer h3{margin:0 0 16px!important;font-size:18px;color:#123d68}
-.agp-test-steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
-.agp-test-steps>div{display:flex;flex-direction:column;gap:8px;border-radius:12px;background:#fff;border:1px solid #dfecf9;padding:13px 14px;min-width:0}
-.agp-test-steps b{color:#154678;font-size:13px}.agp-test-steps span{font-size:12px;color:#536c84;line-height:1.55}
-.agp-soft-heading{margin-top:18px}.agp-soft-heading h3{font-size:16px;margin:0}
-.agp-case-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:17px 0}
-.agp-case-summary .agp-mini{min-height:82px;min-width:0}
-.agp-case-list{margin:20px 0 8px}.agp-case-list>h3{font-size:16px}
-.agp-case{border:1px solid #d8e6f4;border-radius:12px;padding:0;background:#fbfdff;margin:9px 0;overflow:hidden}
-.agp-case summary{padding:12px 15px;display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;font-weight:700;color:#103b62}
-.agp-case-answer{font-size:12px;font-weight:400;color:#587b9e;margin-right:auto}
-.agp-case-remove{border:1px solid #d6e3f2;background:white;border-radius:8px;color:#476584;padding:5px 10px;font-size:11px;cursor:pointer}
-.agp-case-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:12px;border-top:1px solid #dae8f4}
-.agp-case-columns>div{min-width:0}.agp-case-columns b{font-size:12px;color:#41658b;display:block;margin-bottom:7px}
-.agp-case-columns pre{font:12px/1.5 ui-monospace,Consolas,monospace;background:#eff6ff;padding:12px;border-radius:9px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:220px;overflow:auto}
-.agp-advanced-area{margin:12px 0;padding:14px;background:#f7fbff;border:1px solid #d8e9fa;border-radius:12px}
-.agp-check-explainer{padding:15px 17px;margin:12px 0;background:#eff8ff;border-left:3px solid #177beb;border-radius:8px}
-.agp-check-explainer strong{font-size:14px}.agp-check-explainer p{margin:5px 0 0;color:#57708a;font-size:13px;line-height:1.6}
-.agp-schema{margin:15px 0;border:1px solid #dce9f4;border-radius:12px;padding:13px 15px}
-.agp-schema summary{cursor:pointer;font-weight:700;color:#174b74;font-size:13px}.agp-schema .agp-field{margin-top:12px}
-.agp-criteria{margin:16px 0;padding:18px;border:1px solid #d5e5f4;border-radius:12px}
-.agp-registered{margin-top:12px;padding:18px 20px;background:#f1f9ff;border:1px solid #c4e7d7;border-radius:12px}
-.agp-registered>strong{color:#12654c}.agp-registered p{font-size:13px;color:#476b80}
-.agp-live-header{display:flex;align-items:center;flex-wrap:wrap;gap:15px;margin-bottom:14px;font-size:12px;color:#59718a}
-.agp-live-indicator{display:inline-flex;align-items:center;border:1px solid #beddf3;background:#ecf7ff;color:#156098;border-radius:40px;padding:5px 10px;font-size:10px;font-weight:800;letter-spacing:.08em}
-.agp-compare-card{border:1px solid #cbdff1;border-radius:15px;background:#fff;padding:22px;margin:0 0 19px;box-shadow:0 4px 16px #2f64890a}
-.agp-compare-card>h2{font-size:20px;margin:0 0 5px;color:#153452}.agp-compare-card>p{color:#637b94;font-size:13px}
-.agp-compare-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px;margin-top:22px}
-.agp-score{padding:17px 18px;background:#f3f8fd;border:1px solid #e2edf8;border-radius:12px;min-width:0}
-.agp-score small{display:block;font-size:13px;color:#6a7f97}.agp-score strong{font-size:33px;color:#124c85;display:block;margin:9px 0 13px}
-.agp-compare-columns .agp-score:last-child strong{color:#0866d8}
-.agp-meter{height:10px;background:#dce9f7;border-radius:99px;overflow:hidden}.agp-meter>span{display:block;height:100%;background:linear-gradient(90deg,#52a6f0,#176ae3);border-radius:99px;transition:width .5s ease}
-.agp-lift{display:flex;align-items:center;justify-content:space-between;gap:18px;border-top:1px solid #dbe8f6;margin-top:19px;padding-top:14px;color:#59738d}
-.agp-lift strong{font-size:18px;color:#1269c2}.agp-lift span{font-size:13px}
-.agp-row-proof summary{white-space:nowrap;color:#1260aa;cursor:pointer;font-size:12px;font-weight:600}
-.agp-row-proof pre{font:11px/1.5 ui-monospace,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;max-height:190px;overflow:auto;min-width:170px}
-.agp-row-proof .agp-case-columns{min-width:440px}
-.oi-native-table{width:100%;border-collapse:collapse;font:13px/1.45 Inter,Arial,sans-serif}.oi-native-table th,.oi-native-table td{padding:12px 10px;border-bottom:1px solid #d7e6f3;text-align:left;vertical-align:top}.oi-native-table tr:not(:first-child){cursor:pointer}.oi-native-table tr:hover,.oi-native-table .oi-selected-row{background:#eaf5ff}
-.oi-summary{font-size:13px;color:#5d7189;padding:10px 0 13px}
-.oi-summary-cards{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin:6px 0 20px}
-.oi-summary-stat{border:1px solid #d7e6f5;border-radius:12px;padding:16px 14px;background:linear-gradient(135deg,#fff,#f4f9ff)}
-.oi-summary-stat strong{font-size:25px;display:block;color:#1664ad}.oi-summary-stat span{font-size:12px;color:#526f8a;display:block;margin-top:5px}
-@media(max-width:1100px){.agp-test-steps,.agp-case-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.oi-summary-cards{grid-template-columns:repeat(3,minmax(0,1fr))}}
-@media(max-width:680px){.agp-test-steps,.agp-compare-columns,.agp-case-columns{grid-template-columns:1fr}.agp-case-summary,.oi-summary-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.agp-row-proof .agp-case-columns{min-width:230px}.agp-test-explainer{padding:15px}.agp-score strong{font-size:27px}}
-@media(prefers-reduced-motion:reduce){.agp-meter>span{transition:none}}
-
-
-/* Keep the main skill-selection panel two-column, and the explanation and checkout full-width below. */
-.agp-detail>.agp-test-explainer,.agp-detail>.agp-form,.agp-detail>.agp-review-intent{grid-column:1/-1;width:100%;min-width:0}
-.agp-detail>.agp-form{background:#fff;padding:23px 26px;border:1px solid #d2e1ef;border-radius:16px;box-shadow:0 4px 19px #22456d0b;margin-bottom:23px}
-.agp-detail>.agp-form .agp-soft-heading{margin:0 0 12px}
-.agp-detail>.agp-form .agp-btn{margin-top:8px}
 
 </style>
     <script defer src="/app/app.js"></script>
