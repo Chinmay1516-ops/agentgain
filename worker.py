@@ -57,7 +57,19 @@ async def call_local_ollama_fresh_context(
     started = time.perf_counter()
     try:
         timeout = max(30, int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "90")))
-        async with httpx.AsyncClient(timeout=float(timeout), trust_env=False) as client:
+
+        ollama_auth = None
+        if os.getenv("OLLAMA_PASSWORD"):
+            ollama_auth = httpx.BasicAuth(
+                os.getenv("OLLAMA_USERNAME", "agentgain"),
+                os.environ["OLLAMA_PASSWORD"],
+            )
+
+        async with httpx.AsyncClient(
+            timeout=float(timeout),
+            trust_env=False,
+            auth=ollama_auth,
+        ) as client:
             resp = await client.post(
                 settings["OLLAMA_BASE_URL"] + "/api/generate",
                 json={

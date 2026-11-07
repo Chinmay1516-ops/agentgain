@@ -1,7 +1,7 @@
 ﻿"""Central settings. Environment variables are loaded from .env for local development."""
 import os
 from functools import lru_cache
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qsl, urlencode
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -9,26 +9,59 @@ load_dotenv()
 
 @lru_cache
 def get_settings() -> dict:
-    database_url = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./agentgain.db").strip()
+    database_url = os.getenv(
+        "DATABASE_URL",
+        "sqlite+aiosqlite:///./agentgain.db"
+    ).strip()
+
     if not database_url:
         database_url = "sqlite+aiosqlite:///./agentgain.db"
+
+    if database_url.startswith(("postgres://", "postgresql://")):
+        database_url = (
+            "postgresql+asyncpg://"
+            + database_url.split("://", 1)[1]
+        )
+
+    if database_url.startswith("postgresql+asyncpg://"):
+        base_url, _, query = database_url.partition("?")
+        params = dict(parse_qsl(query))
+
+        if "sslmode" in params:
+            params["ssl"] = params.pop("sslmode")
+
+        params.pop("channel_binding", None)
+
+        database_url = base_url
+        if params:
+            database_url += "?" + urlencode(params)
 
     paypal_url = os.getenv("PAYPAL_BASE_URL", "https://api-m.sandbox.paypal.com").rstrip("/")
     if paypal_url != "https://api-m.sandbox.paypal.com":
         raise RuntimeError("Only the PayPal SANDBOX API is allowed in this build.")
 
-    ollama_url = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
-    parsed = urlparse(ollama_url)
-    if parsed.scheme != "http" or parsed.hostname not in ("localhost", "127.0.0.1", "ollama"):
-        raise RuntimeError("OLLAMA_BASE_URL must point to the local Ollama service")
+        ollama_url = os.getenv(
+        "OLLAMA_BASE_URL", "http://127.0.0.1:11434"
+    ).strip().rstrip("/")
 
-    models = [
-        x.strip()
-        for x in os.getenv("ALLOWED_OLLAMA_MODELS", "qwen2.5:7b-instruct").split(",")
-        if x.strip()
-    ]
-    if not models:
-        raise RuntimeError("Set ALLOWED_OLLAMA_MODELS to at least one locally installed model.")
+    parsed = urlparse(ollama_url)
+    remote_host = os.getenv("OLLAMA_REMOTE_HOST", "").strip().lower()
+
+    local_allowed = (
+        parsed.scheme == "http"
+        and parsed.hostname in ("localhost", "127.0.0.1", "ollama")
+    )
+
+    remote_allowed = (
+        parsed.scheme == "https"
+        and bool(remote_host)
+        and parsed.hostname == remote_host
+        and bool(os.getenv("OLLAMA_PASSWORD", ""))
+    )
+
+    if not (local_allowed or remote_allowed):
+        raise RuntimeError("Ollama address is not permitted")
+
 
     return {
         "DATABASE_URL": database_url,
