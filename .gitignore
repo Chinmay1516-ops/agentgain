@@ -13,3 +13,7 @@ private_data/
 *.sqlite
 *.sqlite3
 *.zip
+.vercel/
+.env*
+ollama-tunnel.yml
+vercel-build-log.txt
