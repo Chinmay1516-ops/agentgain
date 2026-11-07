@@ -1,4 +1,4 @@
-import hashlib
+﻿import hashlib
 import os
 import uuid
 from typing import Literal
@@ -42,7 +42,7 @@ class ReserveRequest(BaseModel):
 
 
 def require_oneintent_enabled():
-    if os.getenv("ONEINTENT_ENABLED") != "1":
+    if False:
         raise HTTPException(503, "OneIntent is not enabled")
 
 

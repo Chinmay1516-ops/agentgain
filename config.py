@@ -1,4 +1,4 @@
-"""Central settings. Environment variables are loaded from .env for local development."""
+﻿"""Central settings. Environment variables are loaded from .env for local development."""
 import os
 from functools import lru_cache
 from urllib.parse import urlparse
@@ -60,5 +60,5 @@ def get_settings() -> dict:
         "ELASTIC_API_KEY": os.getenv("ELASTIC_API_KEY", "").strip(),
         "ELASTIC_AGENT_ID": os.getenv("ELASTIC_AGENT_ID", "").strip(),
         "ELASTIC_INTENTS_INDEX": os.getenv("ELASTIC_INTENTS_INDEX", "").strip(),
-        "ONEINTENT_ENABLED": os.getenv("ONEINTENT_ENABLED", "0") == "1",
+        "ONEINTENT_ENABLED": os.getenv("ONEINTENT_ENABLED", "1").strip() == "1",
     }
