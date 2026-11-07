@@ -40,7 +40,7 @@ def get_settings() -> dict:
     if paypal_url != "https://api-m.sandbox.paypal.com":
         raise RuntimeError("Only the PayPal SANDBOX API is allowed in this build.")
 
-        ollama_url = os.getenv(
+    ollama_url = os.getenv(
         "OLLAMA_BASE_URL", "http://127.0.0.1:11434"
     ).strip().rstrip("/")
 
@@ -61,7 +61,16 @@ def get_settings() -> dict:
 
     if not (local_allowed or remote_allowed):
         raise RuntimeError("Ollama address is not permitted")
+    models = [
+        name.strip()
+        for name in os.getenv(
+            "ALLOWED_OLLAMA_MODELS", "qwen2.5:7b-instruct"
+        ).split(",")
+        if name.strip()
+    ]
 
+    if not models:
+        raise RuntimeError("Set ALLOWED_OLLAMA_MODELS to at least one model.")
 
     return {
         "DATABASE_URL": database_url,
@@ -80,7 +89,7 @@ def get_settings() -> dict:
         "BUYER_TOKEN": os.getenv("DEMO_BUYER_TOKEN", "buyer_sandbox_secret_token_1234567890abcdef"),
         "SELLER_TOKEN": os.getenv("DEMO_SELLER_TOKEN", "seller_sandbox_secret_token_1234567890abcdef"),
         "ADMIN_TOKEN": os.getenv("DEMO_ADMIN_TOKEN", "admin_sandbox_secret_token_1234567890abcdef"),
-        "ALLOWED_OLLAMA_MODELS": models,
+        "ALLOWED_OLLAMA_MODELS":models,
         "OLLAMA_BASE_URL": ollama_url,
         "MIN_EVAL_RECORDS": max(3, int(os.getenv("MIN_EVAL_RECORDS", "3"))),
         "PAYMENT_POLL_SECONDS": max(5, int(os.getenv("PAYMENT_POLL_SECONDS", "15"))),
