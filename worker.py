@@ -57,19 +57,7 @@ async def call_local_ollama_fresh_context(
     started = time.perf_counter()
     try:
         timeout = max(30, int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "90")))
-
-        ollama_auth = None
-        if os.getenv("OLLAMA_PASSWORD"):
-            ollama_auth = httpx.BasicAuth(
-                os.getenv("OLLAMA_USERNAME", "agentgain"),
-                os.environ["OLLAMA_PASSWORD"],
-            )
-
-        async with httpx.AsyncClient(
-            timeout=float(timeout),
-            trust_env=False,
-            auth=ollama_auth,
-        ) as client:
+        async with httpx.AsyncClient(timeout=float(timeout), trust_env=False) as client:
             resp = await client.post(
                 settings["OLLAMA_BASE_URL"] + "/api/generate",
                 json={
@@ -107,7 +95,7 @@ async def call_local_ollama_fresh_context(
             "error": (
     f"Ollama HTTP {exc.response.status_code}: {exc.response.text[:500]}"
     if isinstance(exc, httpx.HTTPStatusError)
-    else f"Local model service error: {type(exc).__name__}: {exc}"
+    else f"Local model service error: {type(exc)._name_}: {exc}"
 ),
             "infra_error": True,
             "tokens": 0,
@@ -157,7 +145,7 @@ async def process_single_job(job_id: str) -> None:
             skill_examples = skill.examples_json
         except Exception as exc:
             log.exception("Initialization failed for job %s", job_id)
-            job.last_error = f"{type(exc).__name__}: {exc}"
+            job.last_error = f"{type(exc)._name_}: {exc}"
             job.status = JobStatus.COMPLETED
             job.finished_at = datetime.now(timezone.utc)
             await db.commit()
@@ -271,7 +259,7 @@ async def process_single_job(job_id: str) -> None:
             job = await db_err.get(EvaluationJob, job_id)
             contract = await db_err.get(EvaluationContract, job.contract_id) if job else None
             if job and contract and job.status == JobStatus.RUNNING:
-                job.last_error = f"{type(exc).__name__}: {exc}"
+                job.last_error = f"{type(exc)._name_}: {exc}"
                 job.status = JobStatus.COMPLETED
                 job.finished_at = datetime.now(timezone.utc)
                 contract.eval_verdict = EvalVerdict.TECHNICAL_ERROR

@@ -1,7 +1,7 @@
 .env
 *.db
-*.db-*
-__pycache__/
+.db-
+_pycache_/
 *.py[cod]
 .venv/
 venv/
@@ -13,7 +13,3 @@ private_data/
 *.sqlite
 *.sqlite3
 *.zip
-.vercel/
-.env*
-ollama-tunnel.yml
-vercel-build-log.txt
